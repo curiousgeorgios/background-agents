@@ -130,6 +130,7 @@ describe("model utilities", () => {
 
   it("keeps DEFAULT_MODEL valid", () => {
     expect(isValidModel(DEFAULT_MODEL)).toBe(true);
+    expect(DEFAULT_MODEL).toBe("openai/gpt-5.6-sol");
   });
 
   it("validates all supported provider-prefixed models", () => {
@@ -341,7 +342,7 @@ describe("model utilities", () => {
     expect(getDefaultReasoningEffort("anthropic/claude-fable-5-1")).toBe("high");
     expect(getDefaultReasoningEffort("openai/gpt-5.3-codex")).toBe("high");
     expect(getDefaultReasoningEffort("openai/gpt-5.5")).toBeUndefined();
-    expect(getDefaultReasoningEffort("openai/gpt-5.6-sol")).toBe("medium");
+    expect(getDefaultReasoningEffort("openai/gpt-5.6-sol")).toBe("xhigh");
     expect(getDefaultReasoningEffort("openai/gpt-5.6-terra")).toBe("medium");
     expect(getDefaultReasoningEffort("openai/gpt-5.6-luna")).toBe("medium");
     expect(getDefaultReasoningEffort("xai/grok-build-0.1")).toBeUndefined();
@@ -383,7 +384,7 @@ describe("model utilities", () => {
     });
     expect(getReasoningConfig("openai/gpt-5.6-sol")).toEqual({
       efforts: ["none", "low", "medium", "high", "xhigh"],
-      default: "medium",
+      default: "xhigh",
     });
     expect(getReasoningConfig("openai/gpt-5.6-terra")).toEqual({
       efforts: ["none", "low", "medium", "high", "xhigh"],

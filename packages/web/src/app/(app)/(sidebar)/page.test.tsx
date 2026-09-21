@@ -94,6 +94,8 @@ const repo = {
   defaultBranch: "main",
 };
 
+const CLAUDE_MODEL = "anthropic/claude-sonnet-4-6";
+
 vi.mock("@/lib/auth-session", () => ({
   useAuthSession: () => ({ data: { user: { id: "user-1" } }, status: "authenticated" }),
 }));
@@ -219,11 +221,15 @@ beforeEach(() => {
   mocks.loadingReposValue = false;
   mocks.environmentsLoadingValue = false;
   mocks.environmentsValue = [];
-  mocks.enabledModelsValue = [DEFAULT_MODEL];
+  mocks.enabledModelsValue = [DEFAULT_MODEL, CLAUDE_MODEL];
   mocks.enabledModelOptionsValue = [
     {
+      category: "OpenAI",
+      models: [{ id: DEFAULT_MODEL, name: "GPT 5.6 Sol", description: "" }],
+    },
+    {
       category: "Anthropic",
-      models: [{ id: DEFAULT_MODEL, name: "Claude Sonnet 4.6", description: "" }],
+      models: [{ id: CLAUDE_MODEL, name: "Claude Sonnet 4.6", description: "" }],
     },
   ];
   mocks.providerAccountsValue = [];
@@ -784,7 +790,7 @@ describe("Home", () => {
 
   it("restores a stored harness and switches an incompatible model to one it can run", async () => {
     const openAiModel = "openai/gpt-5.4";
-    mocks.enabledModelsValue = [DEFAULT_MODEL, openAiModel];
+    mocks.enabledModelsValue = [CLAUDE_MODEL, openAiModel];
     localStorage.setItem("open-inspect-last-selected-model", openAiModel);
     localStorage.setItem("open-inspect-last-selected-harness", "claude");
     render(<Home />);
@@ -797,7 +803,7 @@ describe("Home", () => {
     });
 
     await waitFor(() =>
-      expect(sessionCreateBody()).toMatchObject({ harness: "claude", model: DEFAULT_MODEL })
+      expect(sessionCreateBody()).toMatchObject({ harness: "claude", model: CLAUDE_MODEL })
     );
   });
 

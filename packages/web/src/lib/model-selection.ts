@@ -21,20 +21,23 @@ export function resolveModelPreference(
   preference: ModelPreference,
   enabledModels?: readonly string[]
 ): ResolvedModelPreference {
+  const preferredModel = getValidModelOrDefault(preference.model);
   const model = enabledModels
     ? resolveEnabledModel({
         model: preference.model,
         enabledModels,
         fallbackModel: DEFAULT_MODEL,
       })
-    : getValidModelOrDefault(preference.model);
+    : preferredModel;
   const reasoningConfig = getReasoningConfig(model);
   return {
     model,
     reasoningEffort:
       preference.reasoningEffort === undefined
         ? undefined
-        : (reasoningConfig?.efforts.find((effort) => effort === preference.reasoningEffort) ??
-          reasoningConfig?.default),
+        : model !== preferredModel
+          ? reasoningConfig?.default
+          : (reasoningConfig?.efforts.find((effort) => effort === preference.reasoningEffort) ??
+            reasoningConfig?.default),
   };
 }
