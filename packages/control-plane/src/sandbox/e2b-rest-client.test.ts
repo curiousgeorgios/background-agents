@@ -266,6 +266,43 @@ describe("E2BRestClient", () => {
     expect(client.getHostnameForPort("abc", 8080)).toBe("https://8080-abc.e2b.app");
   });
 
+  it("uses a configured sandbox domain when the API omits one", async () => {
+    const client = new E2BRestClient({
+      ...defaultConfig,
+      sandboxDomain: "digitalnachos.com.au.",
+    });
+    expect(client.getHostnameForPort("abc", 8080)).toBe("https://8080-abc.digitalnachos.com.au");
+    expect(client.getHostnameForPort("abc", 8080, "provider.example")).toBe(
+      "https://8080-abc.provider.example"
+    );
+
+    fetchSpy.mockResolvedValue(
+      new Response(
+        connectStream([
+          { flags: 0, body: { event: { start: { pid: 42 } } } },
+          {
+            flags: 0,
+            body: {
+              event: { end: { exited: true, status: "exit status 0" } },
+            },
+          },
+          { flags: 2, body: {} },
+        ]),
+        { status: 200 }
+      )
+    );
+    await client.startProcess("sb-1", "echo hi", { envdAccessToken: "tok" });
+    expect(String(fetchSpy.mock.calls[0][0])).toBe(
+      "https://49983-sb-1.digitalnachos.com.au/process.Process/Start"
+    );
+  });
+
+  it("rejects a sandbox domain containing a scheme or path", () => {
+    expect(
+      () => new E2BRestClient({ ...defaultConfig, sandboxDomain: "https://example.test" })
+    ).toThrow("bare hostname");
+  });
+
   it("pauseSandbox sends no body by default but forwards memory:false for a disk-only pause", async () => {
     const client = new E2BRestClient(defaultConfig);
     fetchSpy.mockResolvedValue(new Response(null, { status: 204 }));

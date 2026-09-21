@@ -89,6 +89,7 @@ export interface EnvConfig {
 
   E2B_API_KEY?: string; // E2B REST API key (X-API-Key header + HMAC derivation)
   E2B_API_URL?: string; // E2B REST API base URL (default https://api.e2b.app)
+  E2B_SANDBOX_DOMAIN?: string; // Public sandbox host suffix when the API omits `domain`
   E2B_TEMPLATE_ID?: string; // Pre-built E2B template ID
   E2B_SANDBOX_TIMEOUT_SECONDS?: string; // Sandbox TTL in seconds; Hobby plans must set 3300
   E2B_AUTO_PAUSE?: string; // "true" (default) pauses on TTL expiry (resumable, auto-resumes) instead of killing

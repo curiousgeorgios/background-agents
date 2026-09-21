@@ -36,6 +36,7 @@ SANDBOX_PROVIDER=e2b
 E2B_API_KEY
 E2B_TEMPLATE_ID
 E2B_API_URL                 # optional
+E2B_SANDBOX_DOMAIN          # optional; required when a self-hosted API omits domain
 E2B_SANDBOX_TIMEOUT_SECONDS # optional
 E2B_AUTO_PAUSE              # optional
 E2B_TEMPLATE_CPU            # optional
@@ -141,6 +142,8 @@ Terraform passes these provider-level values to the control plane:
   authenticate the template build
 - `E2B_TEMPLATE_ID`
 - `E2B_API_URL` (optional)
+- `E2B_SANDBOX_DOMAIN` (optional; public sandbox host suffix for a self-hosted API that omits
+  `domain`)
 
 Model credentials are not among them: E2B sandboxes take every LLM API key from Open-Inspect's
 secrets settings, so add `ANTHROPIC_API_KEY` there for Claude models and the equivalent key for any

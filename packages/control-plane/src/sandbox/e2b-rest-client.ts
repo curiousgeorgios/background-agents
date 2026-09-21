@@ -14,6 +14,8 @@ export interface E2BRestConfig {
   apiUrl: string;
   apiKey: string;
   templateId: string;
+  /** Public sandbox host suffix used when the E2B API omits `domain`. */
+  sandboxDomain?: string;
 }
 
 const TIMEOUT_CREATE_MS = 90_000;
@@ -267,12 +269,21 @@ function scrubbedCreateError(error: E2BApiError, envVars: Record<string, string>
 
 export class E2BRestClient {
   private readonly baseUrl: string;
+  private readonly sandboxDomain: string;
 
   constructor(public readonly config: E2BRestConfig) {
     if (!config.apiUrl) throw new Error("E2BRestClient requires apiUrl");
     if (!config.apiKey) throw new Error("E2BRestClient requires apiKey");
     if (!config.templateId) throw new Error("E2BRestClient requires templateId");
     this.baseUrl = config.apiUrl.replace(/\/+$/, "");
+    const sandboxDomain = config.sandboxDomain?.trim().replace(/\.$/, "");
+    if (
+      sandboxDomain &&
+      (sandboxDomain.includes(":") || sandboxDomain.includes("/") || /\s/.test(sandboxDomain))
+    ) {
+      throw new Error("E2BRestClient sandboxDomain must be a bare hostname");
+    }
+    this.sandboxDomain = sandboxDomain || DEFAULT_SANDBOX_DOMAIN;
   }
 
   async createSandbox(params: E2BCreateSandboxParams): Promise<E2BSandboxCreated> {
@@ -370,7 +381,7 @@ export class E2BRestClient {
     shellCommand: string,
     opts: { domain?: string | null; envdAccessToken: string; signal?: AbortSignal }
   ): Promise<void> {
-    const domain = opts.domain || DEFAULT_SANDBOX_DOMAIN;
+    const domain = opts.domain || this.sandboxDomain;
     const url = `https://${ENVD_PORT}-${id}.${domain}/process.Process/Start`;
     const message = JSON.stringify({
       process: { cmd: "/bin/sh", args: ["-c", shellCommand] },
@@ -462,7 +473,7 @@ export class E2BRestClient {
   }
 
   getHostnameForPort(sandboxId: string, port: number, domain?: string | null): string {
-    return `https://${port}-${sandboxId}.${domain || DEFAULT_SANDBOX_DOMAIN}`;
+    return `https://${port}-${sandboxId}.${domain || this.sandboxDomain}`;
   }
 
   private getHeaders(): Record<string, string> {
