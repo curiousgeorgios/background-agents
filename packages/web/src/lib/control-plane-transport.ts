@@ -51,6 +51,13 @@ function isServiceBinding(value: unknown): value is ServiceBinding {
 async function getServiceBinding(
   correlationFields: Record<string, string>
 ): Promise<ServiceBinding | null> {
+  // A self-hosted Node server can include @opennextjs/cloudflare in its bundle
+  // even though no Workers service-binding runtime exists. Let operators force
+  // the portable HTTP transport instead of accepting OpenNext's local stub.
+  if (process.env.CONTROL_PLANE_TRANSPORT === "http") {
+    return null;
+  }
+
   // In local development (next dev), always use URL-based fetch. When
   // @opennextjs/cloudflare is loaded in a Node.js dev server it can return a
   // stub service binding whose fetch fails with a "no local dev session" error.
