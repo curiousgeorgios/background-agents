@@ -1,4 +1,3 @@
-const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_EXPIRES_IN_SECONDS = 3600;
 
@@ -26,15 +25,12 @@ function validateBrokerResponse(result, providerLabel) {
 }
 
 /**
- * Create a provider-neutral, single-flight client for the session token broker.
- * Each auth plugin owns one instance, so cached credentials never cross providers.
+ * Resolve every inference request against the active prompt author. A cache in
+ * this shared sandbox would let the next collaborator reuse the previous
+ * author's token, even if the control plane selected accounts correctly.
  */
 export function createProviderTokenBroker({ provider, providerLabel }) {
-  let cachedResult = null;
-  let cachedExpiresAt = 0;
-  let refreshPromise = null;
-
-  async function refresh(onRefresh) {
+  async function refresh() {
     const controlPlaneUrl = process.env.CONTROL_PLANE_URL;
     const authToken = process.env.SANDBOX_AUTH_TOKEN;
     const sessionId = getSessionId();
@@ -57,23 +53,15 @@ export function createProviderTokenBroker({ provider, providerLabel }) {
 
     const result = await response.json();
     validateBrokerResponse(result, providerLabel);
-    cachedResult = result;
-    cachedExpiresAt = Date.now() + (result.expiresIn ?? DEFAULT_EXPIRES_IN_SECONDS) * 1000;
-    await onRefresh?.({ ...result, expiresAt: cachedExpiresAt });
-    return { ...result, expiresAt: cachedExpiresAt };
+    return {
+      ...result,
+      expiresAt: Date.now() + (result.expiresIn ?? DEFAULT_EXPIRES_IN_SECONDS) * 1000,
+    };
   }
 
   return {
-    async getAccessToken(onRefresh) {
-      if (cachedResult && cachedExpiresAt - Date.now() > REFRESH_BUFFER_MS) {
-        return { ...cachedResult, expiresAt: cachedExpiresAt };
-      }
-      if (!refreshPromise) {
-        refreshPromise = refresh(onRefresh).finally(() => {
-          refreshPromise = null;
-        });
-      }
-      return refreshPromise;
+    async getAccessToken() {
+      return refresh();
     },
   };
 }

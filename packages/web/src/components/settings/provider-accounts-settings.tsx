@@ -268,7 +268,8 @@ export function ProviderAccountsSettings() {
       <div>
         <h2 className="text-lg font-semibold text-foreground">Provider Accounts</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Connected subscriptions are installation-wide. Credential values are write-only.
+          Prompts you send use your connected account, including in shared chats. Other
+          people&apos;s prompts use theirs. Credential values are write-only.
         </p>
       </div>
 
@@ -283,8 +284,8 @@ export function ProviderAccountsSettings() {
             <div>
               <h3 className="text-sm font-medium text-foreground">Legacy OAuth credentials</h3>
               <p className="text-xs text-muted-foreground">
-                Existing legacy-bound sessions may depend on these credentials. Provider-account
-                defaults affect only sessions created afterward.
+                These credentials are no longer used for subscription prompts. Connect your own
+                account to keep using subscription models.
               </p>
             </div>
             <ul className="mt-3 space-y-1 text-xs text-destructive">
@@ -307,7 +308,7 @@ export function ProviderAccountsSettings() {
         <>
           <section className="overflow-hidden rounded-md border border-border-muted">
             <div className="flex items-center justify-between gap-3 border-b border-border-muted p-4">
-              <h3 className="font-medium text-foreground">Connected accounts</h3>
+              <h3 className="font-medium text-foreground">Your connected accounts</h3>
               {canManage && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

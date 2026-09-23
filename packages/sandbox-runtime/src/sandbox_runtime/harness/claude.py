@@ -339,7 +339,17 @@ class ClaudeHarness:
         transient control-plane failure is an ordinary error the supervisor's
         bridge restart budget covers.
         """
-        self.credential = await self._resolve_credential()
+        if self.config.oauth_managed:
+            if self.credential_client is None:
+                raise HarnessStartError(
+                    "This session uses a connected Claude account but the runtime has no "
+                    "credential endpoint configured."
+                )
+            # No owner's token is fetched until a prompt is active. This
+            # placeholder is never used to connect a Claude child.
+            self.credential = ClaudeCredential.oauth_token("")
+        else:
+            self.credential = await self._resolve_credential()
         binary = self._binary or bundled_claude_binary()
         self.wrapper_path = write_clean_env_wrapper(
             self.config.config_dir / "bin", mode=self.credential.mode, binary=binary
@@ -521,9 +531,14 @@ class ClaudeHarness:
         deadline = loop.time() + max_duration
         try:
             async with asyncio.timeout_at(deadline):
+                if self.config.oauth_managed:
+                    next_credential = await self._resolve_credential()
+                    if next_credential != self.credential:
+                        await self._disconnect()
+                        self.credential = next_credential
                 client = await self._ensure_client(model, prompt.reasoning_effort)
-        except HarnessStartError:
-            raise
+        except HarnessStartError as error:
+            return TurnOutcome.failed(str(error))
         except TimeoutError:
             self.log.error("claude.connect_timeout", message_id=prompt.message_id)
             self._needs_reconnect = True

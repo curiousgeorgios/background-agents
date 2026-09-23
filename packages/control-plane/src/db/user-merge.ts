@@ -72,7 +72,10 @@ const USER_MERGE_COUNT_KEYS = [
   "providerAccountAuthorizationsRepointed",
   "providerAccountAuthorizationAttemptsRepointed",
   "providerAccountsCreatedRepointed",
+  "providerAccountsOwnedRepointed",
   "providerAccountsUpdatedRepointed",
+  "providerAccountPersonalDefaultsDeduped",
+  "providerAccountPersonalDefaultsRepointed",
   "providerAccountDefaultsCreatedRepointed",
   "providerAccountDefaultsUpdatedRepointed",
   "skillsCreatedRepointed",
@@ -217,7 +220,42 @@ const FINAL_REPOINT_OPERATIONS = [
     "model_provider_account_authorization_attempts"
   ),
   regularRepoint("providerAccountsCreatedRepointed", "model_provider_accounts", "created_by"),
+  regularRepoint("providerAccountsOwnedRepointed", "model_provider_accounts", "owner_user_id"),
   regularRepoint("providerAccountsUpdatedRepointed", "model_provider_accounts", "updated_by"),
+  {
+    key: "providerAccountPersonalDefaultsDeduped",
+    subtract: undefined,
+    execute: (db, survivorId, loserId) =>
+      db
+        .prepare(
+          `DELETE FROM personal_model_provider_account_defaults
+         WHERE owner_user_id = ? AND EXISTS (
+           SELECT 1 FROM personal_model_provider_account_defaults AS survivor
+           WHERE survivor.owner_user_id = ?
+             AND survivor.provider = personal_model_provider_account_defaults.provider
+         )`
+        )
+        .bind(loserId, survivorId),
+    preview: (db, survivorId, loserId) =>
+      db
+        .prepare(
+          `SELECT COUNT(*) AS count FROM personal_model_provider_account_defaults
+         WHERE owner_user_id = ? AND EXISTS (
+           SELECT 1 FROM personal_model_provider_account_defaults AS survivor
+           WHERE survivor.owner_user_id = ?
+             AND survivor.provider = personal_model_provider_account_defaults.provider
+         )`
+        )
+        .bind(loserId, survivorId),
+  },
+  {
+    ...regularRepoint(
+      "providerAccountPersonalDefaultsRepointed",
+      "personal_model_provider_account_defaults",
+      "owner_user_id"
+    ),
+    subtract: "providerAccountPersonalDefaultsDeduped",
+  },
   regularRepoint(
     "providerAccountDefaultsCreatedRepointed",
     "model_provider_account_defaults",

@@ -8,6 +8,7 @@ import { ProviderAccountSelectionPolicyError } from "../model-provider-accounts/
 const OPENAI_ACCOUNT_ID = "1".repeat(32);
 const XAI_ACCOUNT_ID = "2".repeat(32);
 const ANTHROPIC_ACCOUNT_ID = "3".repeat(32);
+const OWNER = "owner-1";
 
 function account(
   id: string,
@@ -56,8 +57,15 @@ function stores(
   const defaults = new Map((options.defaults ?? []).map((item) => [item.provider, item]));
   const accounts = new Map((options.accounts ?? []).map((item) => [item.id, item]));
   return {
-    defaults: { get: vi.fn(async (provider: "openai" | "xai") => defaults.get(provider) ?? null) },
-    accounts: { getById: vi.fn(async (id: string) => accounts.get(id) ?? null) },
+    defaults: {
+      get: vi.fn(
+        async (_owner: string, provider: SubscriptionProviderId) => defaults.get(provider) ?? null
+      ),
+    },
+    accounts: {
+      getById: vi.fn(async (id: string) => accounts.get(id) ?? null),
+      getOwnerId: vi.fn(async (id: string) => (accounts.has(id) ? OWNER : null)),
+    },
     adapters: { get: vi.fn(() => ({})) },
   };
 }
@@ -65,7 +73,10 @@ function stores(
 describe("resolveProviderAccountSelections", () => {
   it("uses legacy scoped OAuth when no explicit choice or default exists", async () => {
     await expect(
-      resolveProviderAccountSelections({ unattended: false, harness: "opencode" }, stores())
+      resolveProviderAccountSelections(
+        { ownerUserId: OWNER, unattended: false, harness: "opencode" },
+        stores()
+      )
     ).resolves.toEqual([
       { provider: "openai", authMode: "legacy_scoped_oauth", selectionSource: "legacy_fallback" },
       { provider: "xai", authMode: "legacy_scoped_oauth", selectionSource: "legacy_fallback" },
@@ -79,7 +90,7 @@ describe("resolveProviderAccountSelections", () => {
       accounts: [account(ANTHROPIC_ACCOUNT_ID, "anthropic")],
     });
     const onOpenCode = await resolveProviderAccountSelections(
-      { unattended: false, harness: "opencode" },
+      { ownerUserId: OWNER, unattended: false, harness: "opencode" },
       deps
     );
     expect(onOpenCode[2]).toEqual({
@@ -88,7 +99,7 @@ describe("resolveProviderAccountSelections", () => {
       selectionSource: "harness_fallback",
     });
     const onClaude = await resolveProviderAccountSelections(
-      { unattended: false, harness: "claude" },
+      { ownerUserId: OWNER, unattended: false, harness: "claude" },
       deps
     );
     expect(onClaude[2]).toEqual({
@@ -102,6 +113,7 @@ describe("resolveProviderAccountSelections", () => {
   it("resolves every provider using explicit choices before defaults", async () => {
     const result = await resolveProviderAccountSelections(
       {
+        ownerUserId: OWNER,
         explicit: {
           openai: { mode: "provider_account", accountId: OPENAI_ACCOUNT_ID },
           xai: { mode: "api_key" },
@@ -132,7 +144,7 @@ describe("resolveProviderAccountSelections", () => {
 
   it("applies unattended API-key policy before an active default", async () => {
     const result = await resolveProviderAccountSelections(
-      { unattended: true, harness: "opencode" },
+      { ownerUserId: OWNER, unattended: true, harness: "opencode" },
       stores({
         defaults: [providerDefault("openai", OPENAI_ACCOUNT_ID, "api_key")],
         accounts: [account(OPENAI_ACCOUNT_ID, "openai")],
@@ -155,7 +167,7 @@ describe("resolveProviderAccountSelections", () => {
     const defaults = [providerDefault("openai", OPENAI_ACCOUNT_ID)];
     const deps = stores({ defaults, accounts: [account(OPENAI_ACCOUNT_ID, "openai")] });
     const result = await resolveProviderAccountSelections(
-      { unattended: false, harness: "opencode" },
+      { ownerUserId: OWNER, unattended: false, harness: "opencode" },
       deps
     );
 
@@ -177,6 +189,7 @@ describe("resolveProviderAccountSelections", () => {
   ] as const)("rejects an explicit account that is %s", async (_label, selectedAccount, status) => {
     const error = await resolveProviderAccountSelections(
       {
+        ownerUserId: OWNER,
         explicit: {
           openai: { mode: "provider_account", accountId: OPENAI_ACCOUNT_ID },
         },
@@ -193,7 +206,7 @@ describe("resolveProviderAccountSelections", () => {
   it("treats a default selected by policy as a configuration error when unusable", async () => {
     await expect(
       resolveProviderAccountSelections(
-        { unattended: false, harness: "opencode" },
+        { ownerUserId: OWNER, unattended: false, harness: "opencode" },
         stores({ defaults: [providerDefault("openai", OPENAI_ACCOUNT_ID)] })
       )
     ).rejects.toMatchObject({ status: 404 });
@@ -211,7 +224,10 @@ describe("resolveProviderAccountSelections", () => {
     });
 
     await expect(
-      resolveProviderAccountSelections({ unattended: false, harness: "claude" }, deps)
+      resolveProviderAccountSelections(
+        { ownerUserId: OWNER, unattended: false, harness: "claude" },
+        deps
+      )
     ).resolves.toEqual([
       { provider: "openai", authMode: "api_key", selectionSource: "harness_fallback" },
       { provider: "xai", authMode: "api_key", selectionSource: "harness_fallback" },

@@ -3,8 +3,8 @@
 exports[`route admission matrix > admits a session-bound sandbox token on every sandbox-accepting route 1`] = `
 [
   "POST /sessions/:id/pr sandbox=400 wrong-token=401",
-  "POST /sessions/:id/openai-token-refresh sandbox=404 wrong-token=401",
-  "POST /sessions/:id/xai-token-refresh sandbox=404 wrong-token=401",
+  "POST /sessions/:id/openai-token-refresh sandbox=409 wrong-token=401",
+  "POST /sessions/:id/xai-token-refresh sandbox=409 wrong-token=401",
   "POST /sessions/:id/scm-credentials sandbox=500 wrong-token=401",
   "GET /sessions/:id/tunnel-urls sandbox=200 wrong-token=401",
   "POST /sessions/:id/media sandbox=400 wrong-token=401",
@@ -18,7 +18,7 @@ exports[`route admission matrix > admits a session-bound sandbox token on every 
   "POST /sessions/:id/children/:childId/cancel sandbox=404 wrong-token=401",
   "POST /sessions/:id/children/:childId/prompt sandbox=400 wrong-token=401",
   "POST /sessions/:id/slack-notify sandbox=400 wrong-token=401",
-  "POST /sessions/:id/provider-auth/:provider/access-token sandbox=404 wrong-token=401",
+  "POST /sessions/:id/provider-auth/:provider/access-token sandbox=409 wrong-token=401",
   "POST /sessions/:id/provider-auth/:provider/runtime-credential sandbox=409 wrong-token=401",
   "GET /sessions/:id/commit-signing sandbox=200 wrong-token=401",
   "POST /sessions/:id/commit-signing sandbox=400 wrong-token=401",

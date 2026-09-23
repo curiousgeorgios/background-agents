@@ -103,7 +103,6 @@ export function getProviderAuthenticationError(
 
 export function prepareManagedProviderEnv({
   exposedSecrets,
-  brokerSecrets,
   providerAuthModes,
 }: ManagedProviderEnvOptions): Record<string, string> {
   const env = Object.fromEntries(
@@ -113,11 +112,12 @@ export function prepareManagedProviderEnv({
   for (const provider of SUBSCRIPTION_PROVIDER_IDS) {
     const config = PROVIDER_ENV[provider];
     const mode = providerAuthModes[provider];
+    // Legacy OpenAI/xAI bindings no longer use installation-wide refresh
+    // tokens. Keep the broker plugin installed so each prompt resolves its
+    // author's personal account (or fails closed when none is connected).
     const managed =
       mode === "provider_account" ||
-      (mode === "legacy_scoped_oauth" &&
-        config.legacyRefreshToken !== null &&
-        Boolean(brokerSecrets[config.legacyRefreshToken]));
+      (mode === "legacy_scoped_oauth" && config.legacyRefreshToken !== null);
     if (managed) {
       delete env[config.apiKey];
       for (const key of config.strip) delete env[key];

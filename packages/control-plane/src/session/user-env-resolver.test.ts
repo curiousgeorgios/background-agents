@@ -349,13 +349,14 @@ describe("UserEnvResolver", () => {
         { SHARED: "web", ONLY_WEB: "w" }
       );
 
-      // The secondary's legacy OAuth token is stripped from the exposed env and,
-      // because only global + primary feed broker secrets, does NOT mark xai managed.
+      // The secondary's legacy OAuth token is stripped. Legacy sessions now
+      // install the personal-account broker independent of scoped secrets.
       await expect(h.resolver.getUserEnvVars()).resolves.toEqual({
         SHARED: "web",
         ONLY_GLOBAL: "g",
         ONLY_WEB: "w",
         ONLY_BACKEND: "b",
+        XAI_OAUTH_MANAGED: "1",
       });
     });
 
@@ -545,8 +546,8 @@ describe("UserEnvResolver", () => {
       ["archived", accountRow("active", { archived_at: 5 }), "was removed"],
       ["missing", null, "was removed"],
     ] as const)(
-      "fails the prompt before spawn when the bound account is %s",
-      async (_label, row, fragment) => {
+      "defers the bound %s account check to the active author's credential request",
+      async (_label, row, _fragment) => {
         const h = makeHarness();
         h.db.providerAuthRows = providerAuthRows({
           openai: "api_key",
@@ -557,7 +558,7 @@ describe("UserEnvResolver", () => {
 
         await expect(
           h.resolver.getProviderAuthenticationError("anthropic/claude-sonnet-4-6")
-        ).resolves.toContain(fragment);
+        ).resolves.toBeNull();
       }
     );
 

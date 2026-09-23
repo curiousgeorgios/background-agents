@@ -137,6 +137,7 @@ const MEMBER_PERMISSIONS = new Set<PermissionId>([
   "automations.manage.own",
   "automations.trigger.own",
   "environments.use",
+  "provider_accounts.manage",
   "provider_accounts.read",
   "repositories.use",
   "sessions.collaborate",

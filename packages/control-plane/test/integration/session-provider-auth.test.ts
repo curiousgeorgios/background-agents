@@ -15,8 +15,12 @@ describe("session provider auth persistence", () => {
   beforeEach(async () => {
     await cleanD1Tables();
     await env.DB.exec(
-      "DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_account_credentials; DELETE FROM model_provider_accounts;"
+      "DELETE FROM personal_model_provider_account_defaults; DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_account_credentials; DELETE FROM model_provider_accounts;"
     );
+    await env.DB.prepare(
+      `INSERT INTO users (id, display_name, email, created_at, updated_at)
+       VALUES ('user-1', 'Test User', 'user@example.com', 1, 1)`
+    ).run();
   });
 
   it("keeps the authoritative D1 snapshot when the installation default changes", async () => {
@@ -26,17 +30,20 @@ describe("session provider auth persistence", () => {
       id: FIRST_ACCOUNT_ID,
       provider: "openai",
       displayName: "First",
+      actorId: "user-1",
       now: 10,
     });
     await accounts.create({
       id: SECOND_ACCOUNT_ID,
       provider: "openai",
       displayName: "Second",
+      actorId: "user-1",
       now: 20,
     });
-    await defaults.set("openai", FIRST_ACCOUNT_ID, "provider_account", null, 30);
+    await defaults.set("user-1", "openai", FIRST_ACCOUNT_ID, "provider_account", null, 30);
 
     const providerAuth = await resolveSessionProviderAuth(env.DB, {
+      ownerUserId: "user-1",
       unattended: false,
       harness: "opencode",
     });
@@ -70,7 +77,7 @@ describe("session provider auth persistence", () => {
       } as never
     );
 
-    await defaults.set("openai", SECOND_ACCOUNT_ID, "provider_account", null, 60);
+    await defaults.set("user-1", "openai", SECOND_ACCOUNT_ID, "provider_account", null, 60);
 
     await expect(new SessionIndexStore(env.DB).getCompleteProviderAuth(sessionId)).resolves.toEqual(
       [

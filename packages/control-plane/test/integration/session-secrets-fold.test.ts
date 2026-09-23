@@ -134,7 +134,7 @@ describe("getUserEnvVars session-target fold", () => {
     await expect(getUserEnvVars(stub)).resolves.toEqual(expected);
   });
 
-  it("preserves scoped OAuth for legacy-bound sessions", async () => {
+  it("routes legacy-bound sessions through the personal account broker", async () => {
     await new GlobalSecretsStore(env.DB, KEY()).setSecrets({
       OPENAI_API_KEY: "openai-key",
       XAI_API_KEY: "xai-key",
@@ -144,7 +144,7 @@ describe("getUserEnvVars session-target fold", () => {
 
     await expect(getUserEnvVars(stub)).resolves.toEqual({
       OPENAI_OAUTH_MANAGED: "1",
-      XAI_API_KEY: "xai-key",
+      XAI_OAUTH_MANAGED: "1",
     });
   });
 

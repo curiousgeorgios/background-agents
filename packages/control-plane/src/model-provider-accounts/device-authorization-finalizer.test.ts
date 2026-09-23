@@ -50,6 +50,7 @@ const connection = {
 function subject(createOutcome: "created" | "identity_conflict" | "claim_lost") {
   const accounts = {
     getLifecycleSnapshot: vi.fn(async () => winner),
+    getOwnerId: vi.fn(async () => authorization.userId),
     findLifecycleSnapshotByExternalIdentity: vi
       .fn<() => Promise<ModelProviderAccountLifecycleSnapshot | null>>()
       .mockResolvedValueOnce(null)

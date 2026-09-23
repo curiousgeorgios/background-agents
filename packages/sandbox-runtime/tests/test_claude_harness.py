@@ -228,7 +228,9 @@ class TestOpen:
             await h.harness.open()
 
     @pytest.mark.asyncio
-    async def test_oauth_mode_fetches_the_setup_token_on_open(self, tmp_path: Path) -> None:
+    async def test_oauth_mode_fetches_the_setup_token_for_the_active_prompt(
+        self, tmp_path: Path
+    ) -> None:
         credential_client = FakeCredentialClient(Issued())
         h = Harness(
             tmp_path,
@@ -239,6 +241,9 @@ class TestOpen:
             },
         )
         await h.harness.open()
+        assert credential_client.calls == 0
+        await h.harness.create_session()
+        await _run(h.harness)
         assert credential_client.calls == 1
         assert h.harness.credential is not None
         assert h.harness.credential.mode is ClaudeAuthMode.OAUTH_TOKEN
@@ -251,16 +256,44 @@ class TestOpen:
             oauth_managed=True,
             credential_client=FakeCredentialClient(RuntimeCredentialDenied("account disabled")),
         )
-        with pytest.raises(HarnessStartError, match="account disabled"):
-            await denied.harness.open()
+        await denied.harness.open()
+        await denied.harness.create_session()
+        _, denied_outcome = await _run(denied.harness)
+        assert not denied_outcome.success
+        assert "account disabled" in (denied_outcome.error or "")
 
         transient = Harness(
             tmp_path,
             oauth_managed=True,
             credential_client=FakeCredentialClient(RuntimeCredentialUnavailable("503")),
         )
-        with pytest.raises(RuntimeError, match="unavailable"):
-            await transient.harness.open()
+        await transient.harness.open()
+        await transient.harness.create_session()
+        _, transient_outcome = await _run(transient.harness)
+        assert not transient_outcome.success
+        assert "unavailable" in (transient_outcome.error or "")
+
+    @pytest.mark.asyncio
+    async def test_shared_session_reconnects_with_each_prompt_authors_token(self, tmp_path: Path):
+        credential_client = FakeCredentialClient(Issued("first-user-token"))
+        h = Harness(
+            tmp_path,
+            turns=[[_result(0.1)], [_result(0.2)]],
+            oauth_managed=True,
+            credential_client=credential_client,
+        )
+        await h.harness.open()
+        await h.harness.create_session()
+
+        _, first_outcome = await _run(h.harness, HarnessPrompt(message_id="m1", text="first"))
+        credential_client.outcome = Issued("second-user-token")
+        _, second_outcome = await _run(h.harness, HarnessPrompt(message_id="m2", text="second"))
+
+        assert first_outcome.success and second_outcome.success
+        assert credential_client.calls == 2
+        assert len(h.clients) == 2
+        assert h.clients[0].options["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "first-user-token"
+        assert h.clients[1].options["env"]["CLAUDE_CODE_OAUTH_TOKEN"] == "second-user-token"
 
     @pytest.mark.asyncio
     async def test_oauth_mode_without_a_client_is_deterministic(self, tmp_path: Path) -> None:

@@ -497,6 +497,7 @@ describe("handleCreateSession D1 ordering", () => {
     expect(response.status).toBe(201);
     expect(resolveSessionProviderAuth).toHaveBeenCalledWith(expect.anything(), {
       explicit,
+      ownerUserId: "user-1",
       unattended: true,
       harness: "opencode",
     });

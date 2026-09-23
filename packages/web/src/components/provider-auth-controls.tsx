@@ -192,7 +192,7 @@ export function ProviderAuthControls({
       </Select>
       <p className="text-xs text-muted-foreground">
         {accountsSelectable
-          ? "Provider-account mode overrides this provider's API key for the session."
+          ? "In shared chats, each prompt uses its author's connected account."
           : `${getHarnessLabel(harness!)} runs ${providerName} on its API key; connected accounts are not offered.`}
       </p>
     </div>

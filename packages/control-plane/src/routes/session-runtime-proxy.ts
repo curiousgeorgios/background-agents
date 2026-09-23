@@ -15,7 +15,6 @@ import {
 import { z } from "zod";
 import { UserStore } from "../db/user-store";
 import { SessionIndexStore } from "../db/session-index";
-import type { SubscriptionProviderId } from "@open-inspect/shared/types/provider-accounts";
 import { SessionInternalPaths, type SessionInternalPath } from "../session/contracts";
 import type { Env } from "../types";
 import {
@@ -78,22 +77,6 @@ function simpleProxy(config: SimpleProxyConfig): ProxyHandler {
     }
 
     return response;
-  };
-}
-
-function legacyTokenRefresh(
-  provider: SubscriptionProviderId,
-  internalPath: SessionInternalPath
-): ProxyHandler {
-  return async (_request, _env, params, ctx) => {
-    const binding = await new SessionIndexStore(ctx.db).getProviderAuthForProvider(
-      params.id,
-      provider
-    );
-    if (binding?.authMode !== "legacy_scoped_oauth") {
-      return error("Session does not use legacy scoped OAuth for this provider", 409);
-    }
-    return ctx.sessionRuntime.fetch(params.id, internalPath, { method: "POST" });
   };
 }
 
@@ -399,12 +382,18 @@ sessionRuntimeProxyRoutes.post(
 sessionRuntimeProxyRoutes.post(
   "/sessions/:id/openai-token-refresh",
   admit({ ...SCM_AGNOSTIC_SANDBOX_ROUTE, authorization: NO_AUTHORIZATION }),
-  (c) => dispatchSession(c, legacyTokenRefresh("openai", SessionInternalPaths.openaiTokenRefresh))
+  (c) =>
+    dispatchSession(c, async () =>
+      error("Legacy shared OAuth is disabled; connect a personal account", 409)
+    )
 );
 sessionRuntimeProxyRoutes.post(
   "/sessions/:id/xai-token-refresh",
   admit({ ...SCM_AGNOSTIC_SANDBOX_ROUTE, authorization: NO_AUTHORIZATION }),
-  (c) => dispatchSession(c, legacyTokenRefresh("xai", SessionInternalPaths.xaiTokenRefresh))
+  (c) =>
+    dispatchSession(c, async () =>
+      error("Legacy shared OAuth is disabled; connect a personal account", 409)
+    )
 );
 sessionRuntimeProxyRoutes.post(
   "/sessions/:id/scm-credentials",

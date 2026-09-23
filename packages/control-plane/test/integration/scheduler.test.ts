@@ -51,7 +51,7 @@ describe("Scheduler (integration)", () => {
     await cleanD1Tables();
     await seedActiveUser("user-1");
     await env.DB.exec(
-      "DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_accounts;"
+      "DELETE FROM personal_model_provider_account_defaults; DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_accounts;"
     );
   });
 
@@ -69,8 +69,9 @@ describe("Scheduler (integration)", () => {
           id: accountIds[provider],
           provider,
           displayName: provider,
+          actorId: "user-1",
         });
-        await defaults.set(provider, accountIds[provider], "provider_account", null);
+        await defaults.set("user-1", provider, accountIds[provider], "provider_account", null);
       }
     }
 
@@ -89,7 +90,7 @@ describe("Scheduler (integration)", () => {
         )
       );
 
-      const resolved = await resolveAutomationProviderAuth(env.DB, automation.id);
+      const resolved = await resolveAutomationProviderAuth(env.DB, automation.id, "user-1");
 
       expect(resolved).toContainEqual({
         provider,
@@ -108,7 +109,7 @@ describe("Scheduler (integration)", () => {
         authStore.bindReplace(automation.id, { [provider]: { mode: "api_key" } }, Date.now())
       );
 
-      const resolved = await resolveAutomationProviderAuth(env.DB, automation.id);
+      const resolved = await resolveAutomationProviderAuth(env.DB, automation.id, "user-1");
 
       expect(resolved).toEqual(
         expect.arrayContaining([
@@ -128,9 +129,11 @@ describe("Scheduler (integration)", () => {
         const automation = makeAutomation({ id: `auto-policy-${provider}` });
         await new AutomationStore(env.DB).create(automation);
         const defaults = new ProviderDefaultStore(env.DB);
-        await defaults.set(provider, accountIds[provider], "api_key", null);
+        await defaults.set("user-1", provider, accountIds[provider], "api_key", null);
 
-        await expect(resolveAutomationProviderAuth(env.DB, automation.id)).resolves.toEqual(
+        await expect(
+          resolveAutomationProviderAuth(env.DB, automation.id, "user-1")
+        ).resolves.toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               provider,
@@ -140,8 +143,10 @@ describe("Scheduler (integration)", () => {
           ])
         );
 
-        await defaults.set(provider, accountIds[provider], "provider_account", null);
-        await expect(resolveAutomationProviderAuth(env.DB, automation.id)).resolves.toEqual(
+        await defaults.set("user-1", provider, accountIds[provider], "provider_account", null);
+        await expect(
+          resolveAutomationProviderAuth(env.DB, automation.id, "user-1")
+        ).resolves.toEqual(
           expect.arrayContaining([
             expect.objectContaining({
               provider,

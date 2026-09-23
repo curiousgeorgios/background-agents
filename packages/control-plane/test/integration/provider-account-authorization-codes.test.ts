@@ -79,10 +79,10 @@ async function seedAccount(status = "reconnect_required"): Promise<void> {
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO model_provider_accounts
-      (id, provider, display_name, external_account_id, status, created_at, updated_at)
-     VALUES (?, 'anthropic', 'Preserved Claude', NULL, ?, ?, ?)`
+      (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+     VALUES (?, 'anthropic', 'Preserved Claude', NULL, ?, ?, ?, ?)`
   )
-    .bind(ACCOUNT_ID, status, now, now)
+    .bind(ACCOUNT_ID, status, USER_ID, now, now)
     .run();
   await credentials().create({
     providerAccountId: ACCOUNT_ID,
@@ -167,7 +167,7 @@ describe("provider account authorization-code routes", () => {
     });
     await expect(
       env.DB.prepare(
-        "SELECT provider_account_id, unattended_mode FROM model_provider_account_defaults WHERE provider = 'anthropic'"
+        "SELECT provider_account_id, unattended_mode FROM personal_model_provider_account_defaults WHERE owner_user_id = '11111111111111111111111111111111' AND provider = 'anthropic'"
       ).first()
     ).resolves.toEqual({
       provider_account_id: body.account.id,

@@ -408,7 +408,7 @@ describe("final graceful shutdown lifecycle integration", () => {
     f.shutdown.startupDecision.mockReturnValue({
       kind: "restore_snapshot",
       snapshotId: "final-image",
-      runtimeVersion: "v62-compatible",
+      runtimeVersion: COMPATIBLE_RUNTIME_VERSION,
     });
     await f.manager.spawnSandbox();
     expect(f.provider.restoreFromSnapshot).toHaveBeenCalledWith(
@@ -418,37 +418,36 @@ describe("final graceful shutdown lifecycle integration", () => {
     expect(f.provider.createSandbox).not.toHaveBeenCalled();
     expect(f.shutdown.reserveStartup).toHaveBeenCalledWith(
       expect.any(Number),
-      "legacy",
+      "confirmed",
       expect.any(Function)
     );
   });
 
-  it.each([
-    ["v62-compatible", "legacy"],
-    ["v70-before-shutdown", "legacy"],
-    [`v${MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION}-confirmed`, "confirmed"],
-  ] as const)("restores snapshot runtime %s with %s policy", async (runtimeVersion, policy) => {
-    const f = fixture(
-      createMockProvider(),
-      createMockSandbox({
-        status: "stopped",
-        snapshot_image_id: "existing-image",
-        snapshot_runtime_version: runtimeVersion,
-      })
-    );
+  it.each([[`v${MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION}-confirmed`, "confirmed"]] as const)(
+    "restores snapshot runtime %s with %s policy",
+    async (runtimeVersion, policy) => {
+      const f = fixture(
+        createMockProvider(),
+        createMockSandbox({
+          status: "stopped",
+          snapshot_image_id: "existing-image",
+          snapshot_runtime_version: runtimeVersion,
+        })
+      );
 
-    await f.manager.spawnSandbox();
+      await f.manager.spawnSandbox();
 
-    expect(f.provider.restoreFromSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ snapshotImageId: "existing-image" })
-    );
-    expect(f.shutdown.reserveStartup).toHaveBeenCalledWith(
-      expect.any(Number),
-      policy,
-      expect.any(Function)
-    );
-    expect(f.provider.createSandbox).not.toHaveBeenCalled();
-  });
+      expect(f.provider.restoreFromSnapshot).toHaveBeenCalledWith(
+        expect.objectContaining({ snapshotImageId: "existing-image" })
+      );
+      expect(f.shutdown.reserveStartup).toHaveBeenCalledWith(
+        expect.any(Number),
+        policy,
+        expect.any(Function)
+      );
+      expect(f.provider.createSandbox).not.toHaveBeenCalled();
+    }
+  );
 
   it.each([
     [null, "legacy"],

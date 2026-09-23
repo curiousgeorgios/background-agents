@@ -30,7 +30,6 @@ import {
   ProviderDefaultConstraintError,
   ProviderDefaultStore,
 } from "../db/provider-account-defaults";
-import { SessionIndexStore } from "../db/session-index";
 import { listLegacyProviderCredentials } from "../model-provider-accounts/legacy-provider-credentials";
 import {
   ModelProviderAccountService,
@@ -47,8 +46,7 @@ import {
 import { admit, dispatch } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
 import type { Env } from "../types";
-import { SessionInternalPaths, type SessionInternalPath } from "../session/contracts";
-import { createSessionRuntimeClient } from "../session/runtime-client";
+import { activePromptProviderAccount } from "./active-provider-account";
 import {
   error,
   json,
@@ -56,6 +54,7 @@ import {
   SCM_AGNOSTIC_SANDBOX_ROUTE,
   type RequestContext,
   type SandboxRouteContext,
+  type UserRouteContext,
   NO_AUTHORIZATION,
   requirePermission,
 } from "./shared";
@@ -65,16 +64,6 @@ const PRIVATE_NO_STORE = "private, no-store" as const;
 const NO_STORE = "no-store" as const;
 const renameSchema = z.strictObject({ displayName: modelProviderAccountDisplayNameSchema });
 const logger = createLogger("router:model-provider-accounts");
-const legacyAccessSchema = z.object({
-  access_token: z.string().min(1),
-  expires_in: z.number().optional(),
-  account_id: z.string().optional(),
-});
-/** Providers that ever had a session-scoped legacy OAuth refresh path. */
-const LEGACY_REFRESH_PATH: Partial<Record<SubscriptionProviderId, SessionInternalPath>> = {
-  openai: SessionInternalPaths.openaiTokenRefresh,
-  xai: SessionInternalPaths.xaiTokenRefresh,
-};
 const providerAuthorizationLogger = createLogger("provider-authorization");
 
 function service(env: Env, ctx: RequestContext): ModelProviderAccountService {
@@ -158,6 +147,11 @@ function accountId(id: string): string | Response {
     : error("Invalid provider account ID", 400);
 }
 
+async function requireAccountOwner(ctx: UserRouteContext, id: string): Promise<Response | null> {
+  const ownerId = await new ModelProviderAccountStore(ctx.db).getOwnerId(id);
+  return ownerId === ctx.principal.userId ? null : error("Provider account not found", 404);
+}
+
 async function accountOperation(
   ctx: RequestContext,
   operation: () => Promise<Response>
@@ -231,7 +225,11 @@ modelProviderAccountRoutes.get("/model-provider-accounts", ACCOUNTS_READ, (c) =>
   dispatch(c, async (request, env, _params, ctx) => {
     const query = parseQuery(request, accountListQuerySchema);
     if (query instanceof Response) return query;
-    const listed = await service(env, ctx).list(query.provider, query.archived);
+    const listed = await new ModelProviderAccountStore(ctx.db).listForOwner(
+      ctx.principal.userId,
+      query.provider,
+      query.archived
+    );
     return json({
       accounts: query.status ? listed.filter((account) => account.status === query.status) : listed,
     });
@@ -389,6 +387,8 @@ modelProviderAccountRoutes.get("/model-provider-accounts/:id", ACCOUNTS_READ, (c
   dispatch(c, async (_request, env, params, ctx) => {
     const id = accountId(params.id);
     if (id instanceof Response) return id;
+    const notOwned = await requireAccountOwner(ctx, id);
+    if (notOwned) return notOwned;
     const accounts = service(env, ctx);
     return accountOperation(ctx, async () => json({ account: await accounts.get(id) }));
   })
@@ -397,6 +397,8 @@ modelProviderAccountRoutes.patch("/model-provider-accounts/:id", ACCOUNTS_MANAGE
   dispatch(c, async (request, env, params, ctx) => {
     const id = accountId(params.id);
     if (id instanceof Response) return id;
+    const notOwned = await requireAccountOwner(ctx, id);
+    if (notOwned) return notOwned;
     const body = await parseBody(request, renameSchema, "Invalid provider account name");
     if (body instanceof Response) return body;
     const accounts = service(env, ctx);
@@ -410,6 +412,8 @@ for (const action of ["verify", "disable", "enable"] as const) {
     dispatch(c, async (_request, env, params, ctx) => {
       const id = accountId(params.id);
       if (id instanceof Response) return id;
+      const notOwned = await requireAccountOwner(ctx, id);
+      if (notOwned) return notOwned;
       const accounts = service(env, ctx);
       return accountOperation(ctx, async () => {
         const account =
@@ -429,6 +433,8 @@ modelProviderAccountRoutes.post("/model-provider-accounts/:id/reconnect", ACCOUN
   dispatch(c, async (request, env, params, ctx) => {
     const id = accountId(params.id);
     if (id instanceof Response) return id;
+    const notOwned = await requireAccountOwner(ctx, id);
+    if (notOwned) return notOwned;
     const body = await parseBody(
       request,
       reconnectModelProviderAccountRequestSchema,
@@ -445,6 +451,8 @@ modelProviderAccountRoutes.delete("/model-provider-accounts/:id", ACCOUNTS_MANAG
   dispatch(c, async (_request, env, params, ctx) => {
     const id = accountId(params.id);
     if (id instanceof Response) return id;
+    const notOwned = await requireAccountOwner(ctx, id);
+    if (notOwned) return notOwned;
     const accounts = service(env, ctx);
     return accountOperation(ctx, async () => {
       await accounts.archive(id, ctx.principal.userId);
@@ -454,7 +462,7 @@ modelProviderAccountRoutes.delete("/model-provider-accounts/:id", ACCOUNTS_MANAG
 );
 modelProviderAccountRoutes.get("/model-provider-account-defaults", ACCOUNTS_READ, (c) =>
   dispatch(c, async (_request, _env, _params, ctx) =>
-    json({ defaults: await new ProviderDefaultStore(ctx.db).list() })
+    json({ defaults: await new ProviderDefaultStore(ctx.db).list(ctx.principal.userId) })
   )
 );
 modelProviderAccountRoutes.put("/model-provider-account-defaults/:provider", ACCOUNTS_MANAGE, (c) =>
@@ -473,13 +481,20 @@ modelProviderAccountRoutes.put("/model-provider-account-defaults/:provider", ACC
         new ModelProviderAccountStore(ctx.db),
         modelProviderAccountAdapterRegistry
       ).validateDefault(parsedProvider, body.providerAccountId);
+      if (
+        (await new ModelProviderAccountStore(ctx.db).getOwnerId(body.providerAccountId)) !==
+        ctx.principal.userId
+      ) {
+        return error("Provider account not found", 404);
+      }
       await defaults.set(
+        ctx.principal.userId,
         parsedProvider,
         body.providerAccountId,
         body.unattendedMode,
         ctx.principal.userId
       );
-      return json({ default: await defaults.get(parsedProvider) });
+      return json({ default: await defaults.get(ctx.principal.userId, parsedProvider) });
     } catch (cause) {
       if (cause instanceof ProviderAccountSelectionPolicyError) {
         return error(cause.message, cause.status);
@@ -504,34 +519,10 @@ modelProviderAccountRoutes.delete(
     dispatch(c, async (_request, _env, params, ctx) => {
       const parsedProvider = provider(params.provider);
       if (parsedProvider instanceof Response) return parsedProvider;
-      await new ProviderDefaultStore(ctx.db).remove(parsedProvider);
+      await new ProviderDefaultStore(ctx.db).remove(ctx.principal.userId, parsedProvider);
       return new Response(null, { status: 204 });
     })
 );
-
-async function handleLegacyProviderAccess(
-  env: Env,
-  ctx: SandboxRouteContext,
-  sessionId: string,
-  providerId: SubscriptionProviderId
-): Promise<Response> {
-  const legacyPath = LEGACY_REFRESH_PATH[providerId];
-  if (!legacyPath) return error("Provider has no legacy scoped OAuth path", 409);
-  const response = await createSessionRuntimeClient(env, ctx).fetch(sessionId, legacyPath, {
-    method: "POST",
-  });
-  if (!response.ok) return response;
-  const parsed = legacyAccessSchema.safeParse(await response.json().catch(() => null));
-  if (!parsed.success) return error("Provider access unavailable", 503);
-  return json({
-    accessToken: parsed.data.access_token,
-    ...(parsed.data.expires_in === undefined ? {} : { expiresIn: parsed.data.expires_in }),
-    providerMetadata:
-      providerId === "openai" && parsed.data.account_id
-        ? { accountId: parsed.data.account_id }
-        : {},
-  });
-}
 
 async function handleProviderAccess(
   _request: Request,
@@ -542,30 +533,8 @@ async function handleProviderAccess(
   const sessionId = params.id;
   const parsedProvider = provider(params.provider);
   if (parsedProvider instanceof Response) return parsedProvider;
-  let binding;
-  try {
-    binding = await new SessionIndexStore(ctx.db).getProviderAuthForProvider(
-      sessionId,
-      parsedProvider
-    );
-  } catch (cause) {
-    logger.error("provider_account.session_binding_lookup_failed", {
-      event: "provider_account.session_binding_lookup_failed",
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-      session_id: sessionId,
-      provider: parsedProvider,
-      error: cause instanceof Error ? cause : String(cause),
-    });
-    return error("Session provider auth unavailable", 503);
-  }
-  if (!binding) return error("Session provider account is not configured", 404);
-  if (binding.authMode === "legacy_scoped_oauth") {
-    return handleLegacyProviderAccess(env, ctx, sessionId, parsedProvider);
-  }
-  if (binding.authMode === "api_key") {
-    return error("Session uses API-key mode for this provider", 409);
-  }
+  const accountId = await activePromptProviderAccount(env, ctx, sessionId, parsedProvider);
+  if (accountId instanceof Response) return accountId;
   if (
     modelProviderAccountAdapterRegistry.runtimeCredentialKind(parsedProvider) !==
     "brokered_access_token"
@@ -590,7 +559,7 @@ async function handleProviderAccess(
     { now: () => Date.now(), createOwner: () => generateId() }
   );
   try {
-    return json(await broker.getAccess(binding.providerAccountId, parsedProvider));
+    return json(await broker.getAccess(accountId, parsedProvider));
   } catch (cause) {
     if (cause instanceof ModelProviderAccountBrokerError) {
       const status =

@@ -101,6 +101,7 @@ function stores(account: ModelProviderAccount | null = providerAccount()): {
     accounts: {
       list: vi.fn(async () => []),
       getById: vi.fn(async () => account),
+      getOwnerId: vi.fn(async () => account?.createdBy ?? null),
       findByExternalIdentity: vi.fn(async () => null),
       updateDetails: vi.fn(async () => true),
       setStatus: vi.fn(async () => true),

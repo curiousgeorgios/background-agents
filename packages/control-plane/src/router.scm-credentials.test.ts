@@ -103,7 +103,7 @@ describe("SCM credentials router provider gate", () => {
     }
   );
 
-  it("allows a matching sandbox token to reach the xAI broker", async () => {
+  it("rejects the legacy session-wide xAI broker even for a matching sandbox", async () => {
     const { env, fetch, statement } = createEnv();
     statement.first.mockResolvedValue({
       provider: "xai",
@@ -121,9 +121,8 @@ describe("SCM credentials router provider gate", () => {
       TEST_BACKGROUND_TASK_CONTEXT
     );
 
-    expect(response.status).toBe(202);
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(new URL(fetch.mock.calls[1][0].url).pathname).toBe("/internal/xai-token-refresh");
+    expect(response.status).toBe(409);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it.each(["slack-bot", "github-bot", "linear-bot"] as const)(

@@ -34,7 +34,13 @@ type ErasedProviderAccountAdapter = ModelProviderAccountAdapter<unknown, unknown
 
 export type ModelProviderAccountServiceAccountStore = Pick<
   ModelProviderAccountStore,
-  "list" | "getById" | "findByExternalIdentity" | "updateDetails" | "setStatus" | "archive"
+  | "list"
+  | "getById"
+  | "getOwnerId"
+  | "findByExternalIdentity"
+  | "updateDetails"
+  | "setStatus"
+  | "archive"
 >;
 
 export type ModelProviderAccountServiceCredentialStore = Pick<
@@ -113,6 +119,7 @@ export class ModelProviderAccountService {
       }
     }
     if (existing) {
+      await this.requireOwner(existing.id, actorId);
       return {
         account: await this.persistConnectedCredential(existing, connected, adapter, actorId, now),
         reconnectedExisting: true,
@@ -148,12 +155,22 @@ export class ModelProviderAccountService {
         }
       }
       if (winner) {
+        await this.requireOwner(winner.id, actorId);
         return {
           account: await this.persistConnectedCredential(winner, connected, adapter, actorId, now),
           reconnectedExisting: true,
         };
       }
       throw this.consumedCredentialError(cause);
+    }
+  }
+
+  private async requireOwner(accountId: string, actorId: string): Promise<void> {
+    if ((await this.accounts.getOwnerId(accountId)) !== actorId) {
+      throw new ProviderAccountServiceError(
+        "This provider identity is already connected to another user",
+        409
+      );
     }
   }
 

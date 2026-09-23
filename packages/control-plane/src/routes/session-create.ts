@@ -213,6 +213,7 @@ export async function handleCreateSession(
   let providerAuth;
   try {
     providerAuth = await resolveSessionProviderAuth(ctx.db, {
+      ownerUserId: resolvedUserId,
       explicit: body.providerSelections,
       unattended: spawnSource !== undefined && spawnSource !== "user",
       harness,

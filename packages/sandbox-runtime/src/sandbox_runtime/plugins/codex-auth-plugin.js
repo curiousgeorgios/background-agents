@@ -30,31 +30,15 @@ const ALLOWED_MODELS = new Set([
   "gpt-5.1-codex",
 ]);
 
-async function ensureAccessToken(getAuth, setAuth) {
-  const result = await tokenBroker.getAccessToken(async (refreshed) => {
-    // Update OpenCode's auth state for consistency. The broker cache remains
-    // authoritative when the local auth store cannot be updated.
-    try {
-      const currentAuth = await getAuth();
-      const accountId = refreshed.providerMetadata?.accountId || null;
-      await setAuth({
-        type: "oauth",
-        refresh: currentAuth?.refresh || "managed-by-control-plane",
-        access: refreshed.accessToken,
-        expires: refreshed.expiresAt,
-        ...(accountId && { accountId }),
-      });
-    } catch {
-      // Non-fatal: the in-memory cache is the source of truth
-    }
-  });
+async function ensureAccessToken() {
+  const result = await tokenBroker.getAccessToken();
   return {
     accessToken: result.accessToken,
     accountId: result.providerMetadata?.accountId || null,
   };
 }
 
-export const CodexAuthProxy = async (input) => {
+export const CodexAuthProxy = async () => {
   return {
     auth: {
       provider: "openai",
@@ -106,10 +90,6 @@ export const CodexAuthProxy = async (input) => {
           };
         }
 
-        const setAuth = async (body) => {
-          await input.client.auth.set({ path: { id: "openai" }, body });
-        };
-
         return {
           apiKey: OAUTH_DUMMY_KEY,
           async fetch(requestInput, init) {
@@ -121,7 +101,7 @@ export const CodexAuthProxy = async (input) => {
             request.headers.delete("authorization");
 
             // Ensure we have a valid access token
-            const { accessToken, accountId } = await ensureAccessToken(getAuth, setAuth);
+            const { accessToken, accountId } = await ensureAccessToken();
 
             const parsed = new URL(request.url);
             const url =

@@ -113,9 +113,9 @@ describe("evaluateImageBuildForSpawn", () => {
     }
   });
 
-  it("applies the higher of the harness and shutdown protocol floors", async () => {
+  it("applies the personal-account runtime floor to every harness", async () => {
     const claudeFloor = minCompatibleRuntimeVersionFor("claude");
-    expect(MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION).toBeGreaterThan(claudeFloor);
+    expect(claudeFloor).toBeGreaterThanOrEqual(MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION);
     const image = await readyImage({
       runtime_version: `v${MIN_SHUTDOWN_PROTOCOL_RUNTIME_GENERATION - 1}-before-preservation`,
     });

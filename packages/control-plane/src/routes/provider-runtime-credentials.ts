@@ -19,8 +19,8 @@ import { z } from "zod";
 import { modelProviderAccountAdapterRegistry } from "../auth/model-provider-account-default-adapters";
 import { ModelProviderAccountStore } from "../db/model-provider-accounts";
 import { ProviderCredentialStore } from "../db/provider-account-credentials";
-import { SessionIndexStore } from "../db/session-index";
 import { createLogger } from "../logger";
+import { activePromptProviderAccount } from "./active-provider-account";
 import { admit, dispatch } from "../routing/admit";
 import type { ControlPlaneHonoEnv } from "../routing/hono-env";
 import type { Env } from "../types";
@@ -75,26 +75,11 @@ async function handleRuntimeCredential(
   if (!sandboxId) return error("Sandbox identity unavailable", 403);
   if (headerSandboxId && headerSandboxId !== sandboxId) return error("Wrong sandbox", 403);
 
-  let binding;
-  try {
-    binding = await new SessionIndexStore(ctx.db).getProviderAuthForProvider(sessionId, provider);
-  } catch (cause) {
-    logger.error("provider_credential.session_binding_lookup_failed", {
-      event: "provider_credential.session_binding_lookup_failed",
-      request_id: ctx.request_id,
-      trace_id: ctx.trace_id,
-      session_id: sessionId,
-      provider,
-      error: cause instanceof Error ? cause : String(cause),
-    });
-    return error("Session provider auth unavailable", 503);
-  }
-  if (!binding || binding.authMode !== "provider_account") {
-    return error("Session does not use a connected provider account", 404);
-  }
+  const accountId = await activePromptProviderAccount(env, ctx, sessionId, provider);
+  if (accountId instanceof Response) return accountId;
 
   const accounts = new ModelProviderAccountStore(ctx.db);
-  const account = await accounts.getById(binding.providerAccountId);
+  const account = await accounts.getById(accountId);
   if (!account || account.provider !== provider) {
     return error("Provider account not found", 404);
   }

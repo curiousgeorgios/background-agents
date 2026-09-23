@@ -40,6 +40,7 @@ export class ProviderDefaultStore {
   constructor(private readonly db: SqlDatabase) {}
 
   async set(
+    ownerUserId: string,
     provider: ModelProviderId,
     providerAccountId: string,
     unattendedMode: ProviderUnattendedMode,
@@ -49,18 +50,30 @@ export class ProviderDefaultStore {
     assertModelProviderId(provider);
     const result = await this.db
       .prepare(
-        `INSERT INTO model_provider_account_defaults (
-           provider, provider_account_id, unattended_mode, created_by, updated_by, created_at, updated_at
+        `INSERT INTO personal_model_provider_account_defaults (
+           owner_user_id, provider, provider_account_id, unattended_mode, created_by, updated_by, created_at, updated_at
          )
-         SELECT ?, id, ?, ?, ?, ?, ? FROM model_provider_accounts
-         WHERE id = ? AND provider = ? AND status = 'active' AND archived_at IS NULL
-         ON CONFLICT(provider) DO UPDATE SET
+         SELECT ?, ?, id, ?, ?, ?, ?, ? FROM model_provider_accounts
+         WHERE id = ? AND provider = ? AND owner_user_id = ?
+           AND status = 'active' AND archived_at IS NULL
+         ON CONFLICT(owner_user_id, provider) DO UPDATE SET
            provider_account_id = excluded.provider_account_id,
            unattended_mode = excluded.unattended_mode,
            updated_by = excluded.updated_by,
            updated_at = excluded.updated_at`
       )
-      .bind(provider, unattendedMode, actorId, actorId, now, now, providerAccountId, provider)
+      .bind(
+        ownerUserId,
+        provider,
+        unattendedMode,
+        actorId,
+        actorId,
+        now,
+        now,
+        providerAccountId,
+        provider,
+        ownerUserId
+      )
       .run();
     if (result.meta.changes === 0) {
       throw new ProviderDefaultConstraintError(`Default requires an active ${provider} account`);
@@ -76,22 +89,26 @@ export class ProviderDefaultStore {
     assertModelProviderId(provider);
     return this.db
       .prepare(
-        `INSERT INTO model_provider_account_defaults
-          (provider, provider_account_id, unattended_mode, created_by, updated_by,
+        `INSERT INTO personal_model_provider_account_defaults
+          (owner_user_id, provider, provider_account_id, unattended_mode, created_by, updated_by,
            created_at, updated_at)
-         SELECT ?, id, 'provider_account', ?, ?, ?, ?
+         SELECT ?, ?, id, 'provider_account', ?, ?, ?, ?
          FROM model_provider_accounts
-         WHERE id = ? AND provider = ? AND status = 'active' AND archived_at IS NULL
+         WHERE id = ? AND provider = ? AND owner_user_id = ?
+           AND status = 'active' AND archived_at IS NULL
            AND NOT EXISTS (
-             SELECT 1 FROM model_provider_account_defaults WHERE provider = ?
+             SELECT 1 FROM personal_model_provider_account_defaults
+             WHERE owner_user_id = ? AND provider = ?
            )
            AND NOT EXISTS (
              SELECT 1 FROM model_provider_accounts
-             WHERE provider = ? AND status = 'active' AND archived_at IS NULL AND id <> ?
+             WHERE owner_user_id = ? AND provider = ? AND status = 'active'
+               AND archived_at IS NULL AND id <> ?
            )
-         ON CONFLICT(provider) DO NOTHING`
+         ON CONFLICT(owner_user_id, provider) DO NOTHING`
       )
       .bind(
+        actorId,
         provider,
         actorId,
         actorId,
@@ -99,33 +116,43 @@ export class ProviderDefaultStore {
         now,
         accountId,
         provider,
+        actorId,
+        actorId,
         provider,
+        actorId,
         provider,
         accountId
       );
   }
 
-  async get(provider: ModelProviderId): Promise<ProviderDefault | null> {
+  async get(ownerUserId: string, provider: ModelProviderId): Promise<ProviderDefault | null> {
     assertModelProviderId(provider);
     const row = await this.db
-      .prepare("SELECT * FROM model_provider_account_defaults WHERE provider = ?")
-      .bind(provider)
+      .prepare(
+        "SELECT * FROM personal_model_provider_account_defaults WHERE owner_user_id = ? AND provider = ?"
+      )
+      .bind(ownerUserId, provider)
       .first<DefaultRow>();
     return row ? toDefault(row) : null;
   }
 
-  async list(): Promise<ProviderDefault[]> {
+  async list(ownerUserId: string): Promise<ProviderDefault[]> {
     const rows = await this.db
-      .prepare("SELECT * FROM model_provider_account_defaults ORDER BY provider")
+      .prepare(
+        "SELECT * FROM personal_model_provider_account_defaults WHERE owner_user_id = ? ORDER BY provider"
+      )
+      .bind(ownerUserId)
       .all<DefaultRow>();
     return rows.results.map(toDefault);
   }
 
-  async remove(provider: ModelProviderId): Promise<boolean> {
+  async remove(ownerUserId: string, provider: ModelProviderId): Promise<boolean> {
     assertModelProviderId(provider);
     const result = await this.db
-      .prepare("DELETE FROM model_provider_account_defaults WHERE provider = ?")
-      .bind(provider)
+      .prepare(
+        "DELETE FROM personal_model_provider_account_defaults WHERE owner_user_id = ? AND provider = ?"
+      )
+      .bind(ownerUserId, provider)
       .run();
     return result.meta.changes > 0;
   }

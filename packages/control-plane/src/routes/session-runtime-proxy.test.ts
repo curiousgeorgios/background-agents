@@ -136,20 +136,6 @@ describe("session runtime proxy routes", () => {
     },
     {
       method: "POST",
-      path: "/sessions/session-1/openai-token-refresh",
-      internal: "openaiTokenRefresh",
-      init: { headers: SANDBOX_TOKEN_HEADERS },
-      sandbox: true,
-    },
-    {
-      method: "POST",
-      path: "/sessions/session-1/xai-token-refresh",
-      internal: "xaiTokenRefresh",
-      init: { headers: SANDBOX_TOKEN_HEADERS },
-      sandbox: true,
-    },
-    {
-      method: "POST",
       path: "/sessions/session-1/scm-credentials",
       internal: "scmCredentials",
       init: { headers: SANDBOX_TOKEN_HEADERS },

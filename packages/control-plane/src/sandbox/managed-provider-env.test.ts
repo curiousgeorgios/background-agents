@@ -104,7 +104,7 @@ describe("prepareLegacyManagedProviderEnv", () => {
     ).toEqual({ OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" });
   });
 
-  it("uses scoped OAuth only when a legacy-bound provider has a compatible refresh token", () => {
+  it("routes legacy-bound providers through personal account brokers", () => {
     expect(
       prepareManagedProviderEnv({
         exposedSecrets: { OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" },
@@ -115,7 +115,7 @@ describe("prepareLegacyManagedProviderEnv", () => {
           anthropic: "api_key",
         },
       })
-    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
+    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_OAUTH_MANAGED: "1" });
   });
 });
 
@@ -172,7 +172,7 @@ describe("prepareManagedProviderEnv", () => {
     ).toEqual({ OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" });
   });
 
-  it("uses scoped OAuth only when a legacy-bound provider has a compatible refresh token", () => {
+  it("routes legacy-bound providers through personal account brokers", () => {
     expect(
       prepareManagedProviderEnv({
         exposedSecrets: { OPENAI_API_KEY: "sk-openai", XAI_API_KEY: "xai-key" },
@@ -183,7 +183,7 @@ describe("prepareManagedProviderEnv", () => {
           anthropic: "api_key",
         },
       })
-    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_API_KEY: "xai-key" });
+    ).toEqual({ OPENAI_OAUTH_MANAGED: "1", XAI_OAUTH_MANAGED: "1" });
   });
 });
 

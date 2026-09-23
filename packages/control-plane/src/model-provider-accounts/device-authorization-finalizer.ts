@@ -11,7 +11,7 @@ import type { ModelProviderAccountAtomicWriter } from "../db/model-provider-acco
 
 export type ProviderDeviceAuthorizationFinalizerAccountStore = Pick<
   ModelProviderAccountStore,
-  "getLifecycleSnapshot" | "findLifecycleSnapshotByExternalIdentity"
+  "getLifecycleSnapshot" | "getOwnerId" | "findLifecycleSnapshotByExternalIdentity"
 >;
 
 export class ProviderDeviceAuthorizationFinalizer {
@@ -135,6 +135,9 @@ export class ProviderDeviceAuthorizationFinalizer {
     adoptedExternalAccountId: string | null = null
   ): Promise<boolean> {
     const { account } = snapshot;
+    if ((await this.accounts.getOwnerId(account.id)) !== transaction.userId) {
+      throw new Error("Provider identity is already connected to another user");
+    }
     const outcome = await this.writer.finalizeDeviceAuthorizationReconnect({
       authorization: transaction,
       accountId: account.id,

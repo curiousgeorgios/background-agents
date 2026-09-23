@@ -1,11 +1,20 @@
 import { SELF, env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanD1Tables } from "./cleanup";
-import { initNamedSession, seedSandboxAuth, serviceFetch } from "./helpers";
+import {
+  initNamedSession,
+  seedActiveUser,
+  seedProcessingAuthor,
+  seedSandboxAuth,
+  serviceFetch,
+} from "./helpers";
 import { ProviderCredentialStore } from "../../src/db/provider-account-credentials";
 import { GlobalSecretsStore } from "../../src/db/global-secrets";
+import { runInSessionDO } from "./session-do-access";
 
 const OPENAI_ACCOUNT_ID = "11111111111111111111111111111111";
+const SECOND_USER_ID = "2".repeat(32);
+const SECOND_ACCOUNT_ID = "3".repeat(32);
 
 async function managementFetch(path: string, init?: { method?: string; body?: unknown }) {
   return serviceFetch(`https://test.local${path}`, {
@@ -158,12 +167,13 @@ describe("provider account management routes", () => {
 
   it("creates, updates, lists, and deletes provider defaults", async () => {
     const now = Date.now();
+    await seedActiveUser(OPENAI_ACCOUNT_ID);
     await env.DB.prepare(
       `INSERT INTO model_provider_accounts
-        (id, provider, display_name, status, created_at, updated_at)
-        VALUES (?, 'openai', 'Default OpenAI', 'active', ?, ?)`
+        (id, provider, display_name, status, owner_user_id, created_at, updated_at)
+        VALUES (?, 'openai', 'Default OpenAI', 'active', ?, ?, ?)`
     )
-      .bind(OPENAI_ACCOUNT_ID, now, now)
+      .bind(OPENAI_ACCOUNT_ID, OPENAI_ACCOUNT_ID, now, now)
       .run();
 
     const put = await managementFetch("/model-provider-account-defaults/openai", {
@@ -188,16 +198,17 @@ describe("provider account management routes", () => {
 
   it("returns a retryable gateway error for an unexpected default write failure", async () => {
     const now = Date.now();
+    await seedActiveUser(OPENAI_ACCOUNT_ID);
     await env.DB.prepare(
       `INSERT INTO model_provider_accounts
-        (id, provider, display_name, status, created_at, updated_at)
-        VALUES (?, 'openai', 'Default OpenAI', 'active', ?, ?)`
+        (id, provider, display_name, status, owner_user_id, created_at, updated_at)
+        VALUES (?, 'openai', 'Default OpenAI', 'active', ?, ?, ?)`
     )
-      .bind(OPENAI_ACCOUNT_ID, now, now)
+      .bind(OPENAI_ACCOUNT_ID, OPENAI_ACCOUNT_ID, now, now)
       .run();
     await env.DB.prepare(
       `CREATE TRIGGER reject_provider_default_write
-       BEFORE INSERT ON model_provider_account_defaults
+       BEFORE INSERT ON personal_model_provider_account_defaults
        BEGIN
          SELECT RAISE(FAIL, 'simulated storage failure');
        END`
@@ -252,6 +263,37 @@ describe("provider account management routes", () => {
       "SELECT COUNT(*) AS count FROM model_provider_accounts WHERE external_account_id = 'acct-integration'"
     ).first<{ count: number }>();
     expect(count?.count).toBe(1);
+  });
+
+  it("does not reconnect an identity owned by another user", async () => {
+    const now = Date.now();
+    await seedActiveUser(SECOND_USER_ID);
+    await env.DB.prepare(
+      `INSERT INTO model_provider_accounts
+       (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+       VALUES (?, 'openai', 'Colleague ChatGPT', 'acct-integration', 'active', ?, ?, ?)`
+    )
+      .bind(SECOND_ACCOUNT_ID, SECOND_USER_ID, now, now)
+      .run();
+
+    const response = await managementFetch("/model-provider-accounts", {
+      method: "POST",
+      body: {
+        provider: "openai",
+        displayName: "Must not claim colleague account",
+        refreshToken: "integration-openai-refresh",
+        accountId: "acct-integration",
+      },
+    });
+    expect(response.status).toBe(409);
+    await expect((await managementFetch("/model-provider-accounts")).json()).resolves.toMatchObject(
+      {
+        accounts: [],
+      }
+    );
+    expect((await managementFetch(`/model-provider-accounts/${SECOND_ACCOUNT_ID}`)).status).toBe(
+      404
+    );
   });
 
   it.each([
@@ -367,7 +409,7 @@ describe("provider account sandbox broker route", () => {
       method: "POST",
       headers: { Authorization: `Bearer ${sandboxToken}` },
     });
-    expect(absentBinding.status).toBe(404);
+    expect(absentBinding.status).toBe(409);
     expect(absentBinding.headers.get("Cache-Control")).toBe("no-store");
 
     const unsupportedProvider = await SELF.fetch(
@@ -381,7 +423,7 @@ describe("provider account sandbox broker route", () => {
     expect(unsupportedProvider.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("adapts legacy scoped OAuth to the generic provider access contract", async () => {
+  it("does not issue a legacy shared OAuth token without an active owner", async () => {
     const sessionName = `provider-broker-legacy-${Date.now()}`;
     await new GlobalSecretsStore(env.DB, env.REPO_SECRETS_ENCRYPTION_KEY!).setSecrets({
       OPENAI_OAUTH_REFRESH_TOKEN: "integration-openai",
@@ -398,24 +440,21 @@ describe("provider account sandbox broker route", () => {
       }
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(409);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({
-      accessToken: "integration-openai-access-token",
-      expiresIn: 3600,
-      providerMetadata: { accountId: "acct-integration" },
-    });
+    expect(await response.text()).not.toContain("integration-openai-access-token");
   });
 
-  it("brokers only the account pinned to the trusted session auth row", async () => {
+  it("brokers the active prompt author's account", async () => {
     const sessionName = `provider-broker-success-${Date.now()}`;
     const now = Date.now();
+    await seedActiveUser(OPENAI_ACCOUNT_ID);
     await env.DB.prepare(
       `INSERT INTO model_provider_accounts
-        (id, provider, display_name, external_account_id, status, created_at, updated_at)
-        VALUES (?, 'openai', 'Pinned OpenAI', 'acct-pinned', 'active', ?, ?)`
+        (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+        VALUES (?, 'openai', 'Pinned OpenAI', 'acct-pinned', 'active', ?, ?, ?)`
     )
-      .bind(OPENAI_ACCOUNT_ID, now, now)
+      .bind(OPENAI_ACCOUNT_ID, OPENAI_ACCOUNT_ID, now, now)
       .run();
     await new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!).create({
       providerAccountId: OPENAI_ACCOUNT_ID,
@@ -444,6 +483,7 @@ describe("provider account sandbox broker route", () => {
     });
     const sandboxToken = "provider-broker-success-token";
     await seedSandboxAuth(stub, { authToken: sandboxToken, sandboxId: "sandbox-success" });
+    await seedProcessingAuthor(stub, OPENAI_ACCOUNT_ID);
 
     const response = await SELF.fetch(
       `https://test.local/sessions/${sessionName}/provider-auth/openai/access-token`,
@@ -468,5 +508,134 @@ describe("provider account sandbox broker route", () => {
       }
     );
     expect(legacyBypass.status).toBe(409);
+  });
+
+  it("switches billing accounts between authors in one existing session", async () => {
+    const now = Date.now();
+    await seedActiveUser(OPENAI_ACCOUNT_ID);
+    await seedActiveUser(SECOND_USER_ID);
+    const credentials = new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!);
+    for (const [accountId, ownerUserId, token] of [
+      [OPENAI_ACCOUNT_ID, OPENAI_ACCOUNT_ID, "first-user-token"],
+      [SECOND_ACCOUNT_ID, SECOND_USER_ID, "second-user-token"],
+    ] as const) {
+      await env.DB.prepare(
+        `INSERT INTO model_provider_accounts
+         (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+         VALUES (?, 'openai', ?, ?, 'active', ?, ?, ?)`
+      )
+        .bind(accountId, ownerUserId, `acct-${accountId}`, ownerUserId, now, now)
+        .run();
+      await credentials.create({
+        providerAccountId: accountId,
+        provider: "openai",
+        credentialSchemaVersion: 1,
+        payload: {
+          refreshToken: `refresh-${accountId}`,
+          accessToken: token,
+          accessTokenExpiresAt: now + 60 * 60 * 1000,
+          accountId: `acct-${accountId}`,
+        },
+        accessTokenExpiresAt: now + 60 * 60 * 1000,
+        now,
+      });
+    }
+
+    const sessionName = `shared-billing-${now}`;
+    const { stub } = await initNamedSession(sessionName, {
+      providerAuth: [
+        {
+          provider: "openai",
+          authMode: "provider_account",
+          providerAccountId: OPENAI_ACCOUNT_ID,
+          selectionSource: "explicit",
+        },
+        { provider: "xai", authMode: "api_key", selectionSource: "explicit" },
+        { provider: "anthropic", authMode: "api_key", selectionSource: "explicit" },
+      ],
+    });
+    await seedSandboxAuth(stub, { authToken: "shared-billing-token", sandboxId: "sandbox-1" });
+    const request = () =>
+      SELF.fetch(`https://test.local/sessions/${sessionName}/provider-auth/openai/access-token`, {
+        method: "POST",
+        headers: { Authorization: "Bearer shared-billing-token" },
+      });
+
+    await seedProcessingAuthor(stub, OPENAI_ACCOUNT_ID);
+    expect(await (await request()).json()).toMatchObject({ accessToken: "first-user-token" });
+
+    await runInSessionDO(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE messages SET status = 'completed' WHERE status = 'processing'"
+      );
+    });
+    await seedProcessingAuthor(stub, SECOND_USER_ID);
+    expect(await (await request()).json()).toMatchObject({ accessToken: "second-user-token" });
+
+    await env.DB.prepare("UPDATE model_provider_accounts SET status = 'disabled' WHERE id = ?")
+      .bind(SECOND_ACCOUNT_ID)
+      .run();
+    expect((await request()).status).toBe(409);
+  });
+
+  it("switches xAI billing accounts between authors in one existing session", async () => {
+    const now = Date.now();
+    await seedActiveUser(OPENAI_ACCOUNT_ID);
+    await seedActiveUser(SECOND_USER_ID);
+    const credentials = new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!);
+    for (const [accountId, ownerUserId, token] of [
+      [OPENAI_ACCOUNT_ID, OPENAI_ACCOUNT_ID, "first-xai-token"],
+      [SECOND_ACCOUNT_ID, SECOND_USER_ID, "second-xai-token"],
+    ] as const) {
+      await env.DB.prepare(
+        `INSERT INTO model_provider_accounts
+         (id, provider, display_name, status, owner_user_id, created_at, updated_at)
+         VALUES (?, 'xai', ?, 'active', ?, ?, ?)`
+      )
+        .bind(accountId, ownerUserId, ownerUserId, now, now)
+        .run();
+      await credentials.create({
+        providerAccountId: accountId,
+        provider: "xai",
+        credentialSchemaVersion: 1,
+        payload: {
+          refreshToken: `refresh-${accountId}`,
+          accessToken: token,
+          accessTokenExpiresAt: now + 60 * 60 * 1000,
+        },
+        accessTokenExpiresAt: now + 60 * 60 * 1000,
+        now,
+      });
+    }
+
+    const sessionName = `shared-xai-billing-${now}`;
+    const { stub } = await initNamedSession(sessionName, {
+      providerAuth: [
+        { provider: "openai", authMode: "api_key", selectionSource: "explicit" },
+        {
+          provider: "xai",
+          authMode: "provider_account",
+          providerAccountId: OPENAI_ACCOUNT_ID,
+          selectionSource: "explicit",
+        },
+        { provider: "anthropic", authMode: "api_key", selectionSource: "explicit" },
+      ],
+    });
+    await seedSandboxAuth(stub, { authToken: "shared-xai-token", sandboxId: "sandbox-1" });
+    const request = () =>
+      SELF.fetch(`https://test.local/sessions/${sessionName}/provider-auth/xai/access-token`, {
+        method: "POST",
+        headers: { Authorization: "Bearer shared-xai-token" },
+      });
+
+    await seedProcessingAuthor(stub, OPENAI_ACCOUNT_ID);
+    expect(await (await request()).json()).toMatchObject({ accessToken: "first-xai-token" });
+    await runInSessionDO(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE messages SET status = 'completed' WHERE status = 'processing'"
+      );
+    });
+    await seedProcessingAuthor(stub, SECOND_USER_ID);
+    expect(await (await request()).json()).toMatchObject({ accessToken: "second-xai-token" });
   });
 });

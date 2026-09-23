@@ -11,12 +11,13 @@ import type { SqlDatabase } from "../db/sql-database";
 import { modelProviderAccountAdapterRegistry } from "../auth/model-provider-account-default-adapters";
 import {
   ProviderAccountSelectionPolicy,
+  ProviderAccountSelectionPolicyError,
   type ProviderAccountAdapterLookup,
 } from "../model-provider-accounts/selection-policy";
 
 interface ProviderAccountResolutionStores {
   defaults: Pick<ProviderDefaultStore, "get">;
-  accounts: Pick<ModelProviderAccountStore, "getById">;
+  accounts: Pick<ModelProviderAccountStore, "getById" | "getOwnerId">;
   adapters: ProviderAccountAdapterLookup;
 }
 
@@ -39,6 +40,7 @@ const LEGACY_SCOPED_OAUTH_PROVIDERS: ReadonlySet<SubscriptionProviderId> = new S
 ]);
 
 export interface ProviderAccountResolutionInput {
+  ownerUserId: string;
   explicit?: ModelProviderSelections;
   unattended: boolean;
   /**
@@ -66,6 +68,9 @@ async function resolveProvider(
   const explicit = input.explicit?.[provider];
   if (explicit?.mode === "api_key") return apiKey(provider, "explicit");
   if (explicit?.mode === "provider_account") {
+    if ((await stores.accounts.getOwnerId(explicit.accountId)) !== input.ownerUserId) {
+      throw new ProviderAccountSelectionPolicyError("Selected provider account was not found", 404);
+    }
     const account = await policy.validateSelection(provider, explicit.accountId);
     return {
       provider,
@@ -75,7 +80,7 @@ async function resolveProvider(
     };
   }
 
-  const providerDefault = await stores.defaults.get(provider);
+  const providerDefault = await stores.defaults.get(input.ownerUserId, provider);
   if (!providerDefault) return noSelectionFallback(provider);
   if (!harnessSupportsProviderAuth(input.harness, provider, "provider_account")) {
     return apiKey(provider, "harness_fallback");
@@ -85,6 +90,9 @@ async function resolveProvider(
   }
 
   const account = await policy.validateDefault(provider, providerDefault.providerAccountId);
+  if ((await stores.accounts.getOwnerId(account.id)) !== input.ownerUserId) {
+    throw new ProviderAccountSelectionPolicyError("Default provider account was not found", 404);
+  }
   return {
     provider,
     authMode: "provider_account",

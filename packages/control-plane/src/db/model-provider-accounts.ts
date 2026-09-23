@@ -80,9 +80,9 @@ export class ModelProviderAccountStore {
       .prepare(
         `INSERT INTO model_provider_accounts (
            id, provider, display_name, external_account_id,
-           status, created_by, updated_by, last_verified_at,
+           status, owner_user_id, created_by, updated_by, last_verified_at,
            created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         input.id,
@@ -90,6 +90,7 @@ export class ModelProviderAccountStore {
         input.displayName,
         input.externalAccountId ?? null,
         input.status ?? "active",
+        input.actorId ?? null,
         input.actorId ?? null,
         input.actorId ?? null,
         input.lastVerifiedAt ?? null,
@@ -104,6 +105,34 @@ export class ModelProviderAccountStore {
       .bind(id)
       .first<AccountRow>();
     return row ? toAccount(row) : null;
+  }
+
+  async getOwnerId(id: string): Promise<string | null> {
+    const row = await this.db
+      .prepare(
+        "SELECT owner_user_id FROM model_provider_accounts WHERE id = ? AND archived_at IS NULL"
+      )
+      .bind(id)
+      .first<{ owner_user_id: string | null }>();
+    return row?.owner_user_id ?? null;
+  }
+
+  async listForOwner(
+    ownerUserId: string,
+    provider?: ModelProviderId,
+    includeArchived = false
+  ): Promise<ModelProviderAccount[]> {
+    if (provider) assertModelProviderId(provider);
+    const result = await this.db
+      .prepare(
+        `SELECT * FROM model_provider_accounts
+         WHERE owner_user_id = ? AND (? IS NULL OR provider = ?)
+           AND (? = 1 OR archived_at IS NULL)
+         ORDER BY provider, display_name, id`
+      )
+      .bind(ownerUserId, provider ?? null, provider ?? null, includeArchived ? 1 : 0)
+      .all<AccountRow>();
+    return result.results.map(toAccount);
   }
 
   async getLifecycleSnapshot(id: string): Promise<ModelProviderAccountLifecycleSnapshot | null> {

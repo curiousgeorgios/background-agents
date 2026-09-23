@@ -186,7 +186,7 @@ describe("provider account migration and stores", () => {
 
     expect(first.id).toBe("first-account");
     expect(second.id).toBe("second-account");
-    await expect(new ProviderDefaultStore(env.DB).get("xai")).resolves.toMatchObject({
+    await expect(new ProviderDefaultStore(env.DB).get("user-1", "xai")).resolves.toMatchObject({
       providerAccountId: "first-account",
       unattendedMode: "provider_account",
     });
@@ -215,7 +215,7 @@ describe("provider account migration and stores", () => {
       )
     );
 
-    const providerDefault = await new ProviderDefaultStore(env.DB).get("xai");
+    const providerDefault = await new ProviderDefaultStore(env.DB).get("user-1", "xai");
     expect(created.map((account) => account.id)).toContain(providerDefault?.providerAccountId);
   });
 
@@ -352,6 +352,12 @@ describe("provider account migration and stores", () => {
 
   it("enforces external identity uniqueness, provider matching, and auth-mode shape", async () => {
     const accounts = new ModelProviderAccountStore(env.DB);
+    await env.DB.prepare(
+      `INSERT INTO users (id, display_name, email, created_at, updated_at)
+       VALUES ('user-1', 'Test User', 'user@example.com', ?, ?)`
+    )
+      .bind(now, now)
+      .run();
     await expect(
       accounts.create({
         id: "unsupported",
@@ -365,6 +371,7 @@ describe("provider account migration and stores", () => {
       provider: "openai",
       displayName: "OpenAI",
       externalAccountId: "external-1",
+      actorId: "user-1",
       now,
     });
     await expect(
@@ -378,10 +385,10 @@ describe("provider account migration and stores", () => {
     ).rejects.toThrow();
 
     const defaults = new ProviderDefaultStore(env.DB);
-    await expect(defaults.set("xai", "openai-1", "provider_account", null, now)).rejects.toThrow(
-      /active xai account/i
-    );
-    await defaults.set("openai", "openai-1", "provider_account", null, now);
+    await expect(
+      defaults.set("user-1", "xai", "openai-1", "provider_account", null, now)
+    ).rejects.toThrow(/active xai account/i);
+    await defaults.set("user-1", "openai", "openai-1", "provider_account", null, now);
     await expect(accounts.setStatus("openai-1", "disabled", null, now)).rejects.toThrow(
       /default account must remain active/i
     );
@@ -400,7 +407,7 @@ describe("provider account migration and stores", () => {
       archivedAt: null,
     });
     await expect(accounts.setStatus("openai-1", "active", null, now)).resolves.toBe(true);
-    await defaults.remove("openai");
+    await defaults.remove("user-1", "openai");
     await expect(accounts.setStatus("openai-1", "disabled", null, now)).resolves.toBe(true);
 
     await seedSession("session-1");
@@ -495,16 +502,23 @@ describe("provider account migration and stores", () => {
 
   it("stores defaults and automation auth", async () => {
     const accounts = new ModelProviderAccountStore(env.DB);
+    await env.DB.prepare(
+      `INSERT INTO users (id, display_name, email, created_at, updated_at)
+       VALUES ('user-1', 'Test User', 'user@example.com', ?, ?)`
+    )
+      .bind(now, now)
+      .run();
     await accounts.create({
       id: "account-auth",
       provider: "openai",
       displayName: "OpenAI",
+      actorId: "user-1",
       now,
     });
 
     const defaults = new ProviderDefaultStore(env.DB);
-    await defaults.set("openai", "account-auth", "api_key", null, now);
-    expect(await defaults.get("openai")).toEqual(
+    await defaults.set("user-1", "openai", "account-auth", "api_key", null, now);
+    expect(await defaults.get("user-1", "openai")).toEqual(
       expect.objectContaining({
         provider: "openai",
         providerAccountId: "account-auth",

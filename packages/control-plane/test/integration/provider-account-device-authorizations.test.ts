@@ -17,6 +17,7 @@ import { cleanD1Tables } from "./cleanup";
 import { serviceFetch } from "./helpers";
 
 const ACCOUNT_ID = "22".repeat(16);
+const USER_ID = "1".repeat(32);
 
 async function request(path: string, method: string, body?: unknown): Promise<Response> {
   return serviceFetch(`https://test.local${path}`, {
@@ -52,10 +53,10 @@ async function seedAccount(externalAccountId = "acct-integration"): Promise<void
   const now = Date.now();
   await env.DB.prepare(
     `INSERT INTO model_provider_accounts
-      (id, provider, display_name, external_account_id, status, created_at, updated_at)
-     VALUES (?, 'openai', 'Preserved name', ?, 'reconnect_required', ?, ?)`
+      (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+     VALUES (?, 'openai', 'Preserved name', ?, 'reconnect_required', ?, ?, ?)`
   )
-    .bind(ACCOUNT_ID, externalAccountId, now, now)
+    .bind(ACCOUNT_ID, externalAccountId, USER_ID, now, now)
     .run();
   await new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!).create({
     providerAccountId: ACCOUNT_ID,
@@ -157,7 +158,7 @@ describe("provider account device authorization routes", () => {
     });
 
     const providerDefault = await env.DB.prepare(
-      "SELECT provider_account_id, unattended_mode FROM model_provider_account_defaults WHERE provider = 'xai'"
+      "SELECT provider_account_id, unattended_mode FROM personal_model_provider_account_defaults WHERE owner_user_id = '11111111111111111111111111111111' AND provider = 'xai'"
     ).first<{ provider_account_id: string; unattended_mode: string }>();
     expect(providerDefault).toEqual({
       provider_account_id: connectedBody.account.id,

@@ -303,7 +303,7 @@ describe("ProviderAccountsSettings", () => {
     });
     render(<ProviderAccountsSettings />);
 
-    expect(screen.getByRole("heading", { name: "Connected accounts" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your connected accounts" })).toBeInTheDocument();
     expect(screen.getByText("Team ChatGPT")).toBeInTheDocument();
     expect(screen.getByText("SuperGrok")).toBeInTheDocument();
 

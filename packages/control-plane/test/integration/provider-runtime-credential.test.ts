@@ -3,19 +3,27 @@ import { createExecutionContext, env } from "cloudflare:test";
 import { ProviderCredentialStore } from "../../src/db/provider-account-credentials";
 import { ModelProviderAccountStore } from "../../src/db/model-provider-accounts";
 import { cleanD1Tables } from "./cleanup";
-import { initNamedSession, routeRequest, seedSandboxAuth } from "./helpers";
+import {
+  initNamedSession,
+  routeRequest,
+  seedActiveUser,
+  seedProcessingAuthor,
+  seedSandboxAuth,
+} from "./helpers";
+import { runInSessionDO } from "./session-do-access";
 
 const ANTHROPIC_ACCOUNT_ID = "a".repeat(32);
 const OPENAI_ACCOUNT_ID = "b".repeat(32);
+const OWNER_ID = "1".repeat(32);
 const YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 async function seedAnthropicAccount(now: number, expiresAt = now + YEAR_MS) {
   await env.DB.prepare(
     `INSERT INTO model_provider_accounts
-      (id, provider, display_name, external_account_id, status, created_at, updated_at)
-      VALUES (?, 'anthropic', 'Owner Claude', NULL, 'active', ?, ?)`
+      (id, provider, display_name, external_account_id, status, owner_user_id, created_at, updated_at)
+      VALUES (?, 'anthropic', 'Owner Claude', NULL, 'active', ?, ?, ?)`
   )
-    .bind(ANTHROPIC_ACCOUNT_ID, now, now)
+    .bind(ANTHROPIC_ACCOUNT_ID, OWNER_ID, now, now)
     .run();
   await new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!).create({
     providerAccountId: ANTHROPIC_ACCOUNT_ID,
@@ -73,8 +81,9 @@ describe("stored provider secret delivery", () => {
   beforeEach(async () => {
     await cleanD1Tables();
     await env.DB.exec(
-      "DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_account_credentials; DELETE FROM model_provider_accounts;"
+      "DELETE FROM personal_model_provider_account_defaults; DELETE FROM model_provider_account_defaults; DELETE FROM model_provider_account_credentials; DELETE FROM model_provider_accounts;"
     );
+    await seedActiveUser(OWNER_ID);
   });
 
   it("delivers the setup token to the bound sandbox", async () => {
@@ -83,6 +92,7 @@ describe("stored provider secret delivery", () => {
     const sessionName = `issuance-${now}`;
     const { stub } = await initNamedSession(sessionName, { providerAuth: anthropicSessionAuth() });
     await seedSandboxAuth(stub, { authToken: "sandbox-token", sandboxId: "sandbox-1" });
+    await seedProcessingAuthor(stub, OWNER_ID);
 
     const response = await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1");
 
@@ -94,6 +104,52 @@ describe("stored provider secret delivery", () => {
       credentialVersion: 1,
       expiresAt: expect.any(Number),
     });
+  });
+
+  it("switches Claude credentials between authors in one existing session", async () => {
+    const now = Date.now();
+    const secondUserId = "2".repeat(32);
+    const secondAccountId = "c".repeat(32);
+    await seedAnthropicAccount(now);
+    await seedActiveUser(secondUserId);
+    await env.DB.prepare(
+      `INSERT INTO model_provider_accounts
+       (id, provider, display_name, status, owner_user_id, created_at, updated_at)
+       VALUES (?, 'anthropic', 'Colleague Claude', 'active', ?, ?, ?)`
+    )
+      .bind(secondAccountId, secondUserId, now, now)
+      .run();
+    await new ProviderCredentialStore(env.DB, env.PROVIDER_ACCOUNTS_ENCRYPTION_KEY!).create({
+      providerAccountId: secondAccountId,
+      provider: "anthropic",
+      credentialSchemaVersion: 1,
+      payload: {
+        kind: "setup_token",
+        token: "sk-ant-oat01-colleague-secret",
+        expiresAt: now + YEAR_MS,
+        scopes: ["user:inference"],
+      },
+      accessTokenExpiresAt: now + YEAR_MS,
+      now,
+    });
+
+    const sessionName = `shared-claude-${now}`;
+    const { stub } = await initNamedSession(sessionName, { providerAuth: anthropicSessionAuth() });
+    await seedSandboxAuth(stub, { authToken: "sandbox-token", sandboxId: "sandbox-1" });
+    await seedProcessingAuthor(stub, OWNER_ID);
+    const first = await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1");
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ secret: "sk-ant-oat01-integration-secret" });
+
+    await runInSessionDO(stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE messages SET status = 'completed' WHERE status = 'processing'"
+      );
+    });
+    await seedProcessingAuthor(stub, secondUserId);
+    const second = await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1");
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ secret: "sk-ant-oat01-colleague-secret" });
   });
 
   it("refuses the access-token route for a stored-secret provider", async () => {
@@ -128,7 +184,7 @@ describe("stored provider secret delivery", () => {
     expect(response.status).toBe(403);
   });
 
-  it("refuses sessions that are not bound to a connected account", async () => {
+  it("refuses credential issuance without an active prompt author", async () => {
     const now = Date.now();
     await seedAnthropicAccount(now);
     const sessionName = `issuance-api-key-${now}`;
@@ -136,7 +192,7 @@ describe("stored provider secret delivery", () => {
     await seedSandboxAuth(stub, { authToken: "sandbox-token", sandboxId: "sandbox-1" });
 
     const response = await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1");
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(409);
   });
 
   it("rejects brokered providers on the stored-secret route", async () => {
@@ -178,6 +234,7 @@ describe("stored provider secret delivery", () => {
     const sessionName = `issuance-expired-${now}`;
     const { stub } = await initNamedSession(sessionName, { providerAuth: anthropicSessionAuth() });
     await seedSandboxAuth(stub, { authToken: "sandbox-token", sandboxId: "sandbox-1" });
+    await seedProcessingAuthor(stub, OWNER_ID);
 
     const response = await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1");
 
@@ -209,6 +266,7 @@ describe("stored provider secret delivery", () => {
     const sessionName = `issuance-disable-${now}`;
     const { stub } = await initNamedSession(sessionName, { providerAuth: anthropicSessionAuth() });
     await seedSandboxAuth(stub, { authToken: "sandbox-token", sandboxId: "sandbox-1" });
+    await seedProcessingAuthor(stub, OWNER_ID);
     expect((await fetchRuntimeCredential(sessionName, "sandbox-token", "sandbox-1")).status).toBe(
       200
     );

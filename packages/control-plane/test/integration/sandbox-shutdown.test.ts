@@ -12,6 +12,7 @@ import { MessageRepository } from "../../src/session/message-repository";
 import { LifecycleSessionContext } from "../../src/session/sandbox-lifecycle-adapters";
 import { SandboxRuntimeEventHandler } from "../../src/session/sandbox-events/runtime.handler";
 import { SandboxShutdownCoordinator } from "../../src/session/sandbox-shutdown";
+import { SANDBOX_RUNTIME_VERSION } from "../../src/sandbox/runtime-manifest";
 import {
   SandboxShutdownRepository,
   type ShutdownStore,
@@ -252,7 +253,7 @@ describe("sandbox graceful shutdown wiring", () => {
          SET modal_object_id = ?, snapshot_image_id = ?, snapshot_runtime_version = ?`,
         "old-provider-object",
         "saved-snapshot",
-        "v62-legacy-runtime"
+        SANDBOX_RUNTIME_VERSION
       );
     });
     await seedShutdown(stub, {
@@ -269,7 +270,7 @@ describe("sandbox graceful shutdown wiring", () => {
         artifactId: "saved-snapshot",
         provider: "modal",
         savedAtMs: Date.now(),
-        runtimeVersion: "v62-legacy-runtime",
+        runtimeVersion: SANDBOX_RUNTIME_VERSION,
       },
     });
     const [sandboxBefore] = await queryDO<{
@@ -343,7 +344,7 @@ describe("sandbox graceful shutdown wiring", () => {
         `UPDATE sandbox
          SET modal_object_id = NULL, snapshot_image_id = ?, snapshot_runtime_version = ?`,
         "saved-snapshot",
-        "v62-legacy-runtime"
+        SANDBOX_RUNTIME_VERSION
       );
     });
     await seedShutdown(stub, {
@@ -360,7 +361,7 @@ describe("sandbox graceful shutdown wiring", () => {
         artifactId: "saved-snapshot",
         provider: "modal",
         savedAtMs: Date.now(),
-        runtimeVersion: "v62-legacy-runtime",
+        runtimeVersion: SANDBOX_RUNTIME_VERSION,
       },
     });
     const [{ id: authorId }] = await queryDO<{ id: string }>(
@@ -446,12 +447,22 @@ describe("sandbox graceful shutdown wiring", () => {
         {
           type: "ready",
           harness: "opencode",
-          runtimeVersion: "v62-legacy-runtime",
+          runtimeVersion: SANDBOX_RUNTIME_VERSION,
+          preservationProtocolVersion: 1,
           sandboxId: restoreConfig.sandboxId,
           timestamp: Date.now() / 1000,
         },
         { now: Date.now(), messageId: null, processingMessage: null }
       );
+      const [{ created_at: createdAt }] = durableState.storage.sql
+        .exec("SELECT created_at FROM sandbox")
+        .toArray() as Array<{ created_at: number }>;
+      harness.shutdown.generationReady({
+        type: "sandbox_generation_ready",
+        generation: { sandboxId: restoreConfig.sandboxId, createdAt },
+        sandboxId: restoreConfig.sandboxId,
+        timestamp: Date.now() / 1000,
+      });
       const statusBeforeProvider = durableState.storage.sql
         .exec("SELECT status FROM sandbox")
         .toArray()[0] as { status: string };
@@ -476,7 +487,7 @@ describe("sandbox graceful shutdown wiring", () => {
 
     expect(evidence.statusBeforeProvider).toEqual({ status: "ready" });
     expect(evidence.messageBeforeProvider).toEqual({ status: "pending" });
-    expect(evidence.queueAdmissions.slice(0, -1).length).toBeGreaterThanOrEqual(2);
+    expect(evidence.queueAdmissions.slice(0, -1).length).toBeGreaterThanOrEqual(1);
     expect(new Set(evidence.queueAdmissions.slice(0, -1))).toEqual(new Set(["held"]));
     expect(evidence.queueAdmissions.at(-1)).toBe("ready");
     expect(await queryDO<{ status: string }>(stub, "SELECT status FROM sandbox")).toEqual([

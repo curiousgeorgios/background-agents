@@ -288,6 +288,34 @@ export async function queryDO<T>(
   });
 }
 
+/** Place a test-only prompt in processing state for provider issuance tests. */
+export async function seedProcessingAuthor(
+  stub: DurableObjectStub,
+  canonicalUserId: string
+): Promise<void> {
+  await runInSessionDO(stub, (_instance, state) => {
+    const participantId = `provider-author-${canonicalUserId}`;
+    state.storage.sql.exec(
+      `INSERT OR REPLACE INTO participants
+       (id, user_id, canonical_user_id, role, joined_at)
+       VALUES (?, ?, ?, 'member', ?)`,
+      participantId,
+      canonicalUserId,
+      canonicalUserId,
+      Date.now()
+    );
+    state.storage.sql.exec(
+      `INSERT INTO messages
+       (id, author_id, content, source, status, created_at, started_at)
+       VALUES (?, ?, 'provider test', 'web', 'processing', ?, ?)`,
+      `provider-message-${canonicalUserId}`,
+      participantId,
+      Date.now(),
+      Date.now()
+    );
+  });
+}
+
 export async function waitForSandboxStatus(
   stub: DurableObjectStub,
   status: string,
